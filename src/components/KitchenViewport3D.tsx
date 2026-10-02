@@ -44,10 +44,28 @@ function isObjectVisible(object: THREE.Object3D): boolean {
   return true;
 }
 
+type SinkInstallation = {
+  original: THREE.Object3D;
+  originalVisible: boolean;
+  group: THREE.Group;
+  clone: THREE.Object3D;
+  meshes: THREE.Object3D[];
+  target: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+  targetMatrix: THREE.Matrix4;
+  targetPosition: THREE.Vector3;
+  stagingPosition: THREE.Vector3;
+  plane: THREE.Plane;
+  tolerance: number;
+  locked: boolean;
+  drag: { pointerId: number; offset: THREE.Vector3; controlsEnabled: boolean } | null;
+};
+
 interface KitchenViewport3DProps {
   config: KitchenConfig;
   lang: Language;
   mode?: AppMode;
+  installationActive?: boolean;
+  onInstallationDrop?: (correct: boolean) => void;
   onProductSelect?: (productId: string) => void;
   onAvailableProductsChange?: (productIds: string[]) => void;
   activeFocus?: 'sink' | 'cooktop' | 'hood' | 'perspective' | CameraPresetId;
@@ -62,6 +80,8 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
   config,
   lang,
   mode = 'explore',
+  installationActive = false,
+  onInstallationDrop,
   onProductSelect,
   onAvailableProductsChange,
   activeFocus,
@@ -100,13 +120,18 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
   const modeRef = useRef(mode);
   const onProductSelectRef = useRef(onProductSelect);
   const onAvailableProductsChangeRef = useRef(onAvailableProductsChange);
+  const installationActiveRef = useRef(installationActive);
+  const onInstallationDropRef = useRef(onInstallationDrop);
+  const sinkInstallationRef = useRef<SinkInstallation | null>(null);
 
   // Keep React callbacks current without recreating the WebGL world on game updates.
   useEffect(() => {
     modeRef.current = mode;
     onProductSelectRef.current = onProductSelect;
     onAvailableProductsChangeRef.current = onAvailableProductsChange;
-  }, [mode, onProductSelect, onAvailableProductsChange]);
+    installationActiveRef.current = installationActive;
+    onInstallationDropRef.current = onInstallationDrop;
+  }, [mode, onProductSelect, onAvailableProductsChange, installationActive, onInstallationDrop]);
 
   // Dynamic mesh & group references for animations, exploded views & isolation
   const kitchenGroupRef = useRef<THREE.Group | null>(null);
@@ -156,6 +181,95 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     lastInteractionTimeRef.current = performance.now();
     needsRenderRef.current = true;
   }, []);
+
+  const stopSinkDrag = useCallback((resetPosition: boolean) => {
+    const training = sinkInstallationRef.current;
+    if (!training?.drag) return;
+    const drag = training.drag;
+    training.drag = null; // Clear before releasing capture (which can emit lostpointercapture).
+    if (controlsRef.current) controlsRef.current.enabled = drag.controlsEnabled;
+    const canvas = rendererRef.current?.domElement;
+    if (canvas?.hasPointerCapture(drag.pointerId)) canvas.releasePointerCapture(drag.pointerId);
+    if (resetPosition) training.clone.position.copy(training.group.worldToLocal(training.stagingPosition.clone()));
+    markInteraction();
+  }, [markInteraction]);
+
+  const clearSinkInstallation = useCallback(() => {
+    const training = sinkInstallationRef.current;
+    if (!training) return;
+    stopSinkDrag(false);
+    sinkInstallationRef.current = null;
+    training.original.visible = training.originalVisible;
+    training.group.removeFromParent();
+    training.group.clear();
+    // clone(true) shares the real sink's geometry/materials; only the helper owns resources.
+    training.target.geometry.dispose();
+    training.target.material.dispose();
+    markInteraction();
+  }, [stopSinkDrag, markInteraction]);
+
+  const createSinkInstallation = useCallback(() => {
+    const scene = sceneRef.current;
+    const kitchen = kitchenGroupRef.current;
+    if (!scene || !kitchen || sinkInstallationRef.current) return;
+    let sink: THREE.Object3D | undefined;
+    kitchen.traverse((object) => { if (object.userData.productId === 'sink') sink = object; });
+    if (!sink) return;
+    kitchen.updateWorldMatrix(true, true);
+    const targetMatrix = sink.matrixWorld.clone();
+    const targetPosition = new THREE.Vector3().setFromMatrixPosition(targetMatrix);
+    const bounds = new THREE.Box3().setFromObject(sink);
+    const size = bounds.getSize(new THREE.Vector3());
+    const kitchenBounds = new THREE.Box3().setFromObject(kitchen);
+    const stagingPosition = targetPosition.clone();
+    // In front of the kitchen at installation height, aligned toward the current view.
+    stagingPosition.x = kitchenBounds.getCenter(new THREE.Vector3()).x;
+    stagingPosition.z = Math.max(kitchenBounds.max.z, bounds.max.z) + size.z * 0.7;
+    const cameraPosition = cameraRef.current?.position;
+    const viewTarget = controlsRef.current?.target;
+    if (cameraPosition && viewTarget && cameraPosition.z - viewTarget.z > 0.1) {
+      stagingPosition.x = THREE.MathUtils.clamp(
+        viewTarget.x + (stagingPosition.z - viewTarget.z) * (cameraPosition.x - viewTarget.x) / (cameraPosition.z - viewTarget.z),
+        kitchenBounds.min.x + size.x / 2, kitchenBounds.max.x - size.x / 2,
+      );
+    }
+
+    const group = new THREE.Group();
+    group.name = 'sink-installation-training';
+    scene.add(group);
+    group.updateWorldMatrix(true, false);
+    const clone = sink.clone(true);
+    clone.name = 'training-sink';
+    // Convert the captured WORLD matrix into the temporary parent's local space.
+    new THREE.Matrix4().copy(group.matrixWorld).invert().multiply(targetMatrix)
+      .decompose(clone.position, clone.quaternion, clone.scale);
+    clone.position.copy(group.worldToLocal(stagingPosition.clone()));
+    clone.visible = true;
+    group.add(clone);
+    const meshes: THREE.Object3D[] = [];
+    clone.traverse((object) => { if ((object as THREE.Mesh).isMesh) meshes.push(object); });
+
+    const target = new THREE.Mesh(
+      new THREE.PlaneGeometry(size.x, size.z),
+      new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    target.name = 'sink-installation-target';
+    target.rotation.x = -Math.PI / 2;
+    const targetCenter = bounds.getCenter(new THREE.Vector3());
+    targetCenter.y = targetPosition.y + 0.008;
+    target.position.copy(group.worldToLocal(targetCenter));
+    group.add(target);
+    sinkInstallationRef.current = {
+      original: sink, originalVisible: sink.visible, group, clone, meshes, target,
+      targetMatrix, targetPosition, stagingPosition,
+      plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -targetPosition.y),
+      // 20% of the smaller measured footprint dimension (about 0.1 m for this sink).
+      tolerance: Math.min(size.x, size.z) * 0.2,
+      locked: false, drag: null,
+    };
+    sink.visible = false;
+    markInteraction();
+  }, [markInteraction]);
 
   // Exploded factor synchronization
   useEffect(() => {
@@ -695,6 +809,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
   const rebuildKitchenScene = useCallback(() => {
     if (!sceneRef.current) return;
     const scene = sceneRef.current;
+    clearSinkInstallation(); // Remove shared clones BEFORE disposing the previous kitchen.
     selectableObjectsRef.current = [];
 
     // Remove existing kitchen group if any
@@ -2195,8 +2310,9 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     onAvailableProductsChangeRef.current?.([...productIds]);
 
     scene.add(kitchen);
+    if (modeRef.current === 'game' && installationActiveRef.current) createSinkInstallation();
     markInteraction();
-  }, [config, disposeHierarchy, markInteraction]);
+  }, [config, disposeHierarchy, markInteraction, clearSinkInstallation, createSinkInstallation]);
 
   // Three.js Scene Setup, Interactive Throttling & Resource Cleanup
   useEffect(() => {
@@ -2305,43 +2421,104 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
-    let clickStart: { pointerId: number; x: number; y: number } | null = null;
-    const onSelectionPointerDown = (event: PointerEvent) => {
-      clickStart = modeRef.current === 'game' && event.isPrimary && event.button === 0
-        ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
-        : null;
-    };
-    const onSelectionPointerMove = (event: PointerEvent) => {
-      if (clickStart && event.pointerId === clickStart.pointerId &&
-          Math.hypot(event.clientX - clickStart.x, event.clientY - clickStart.y) > 6) {
-        clickStart = null; // Orbit gestures must never submit an answer.
-      }
-    };
-    const onSelectionPointerUp = (event: PointerEvent) => {
-      const start = clickStart;
-      clickStart = null;
-      if (modeRef.current !== 'game' || !start || event.pointerId !== start.pointerId ||
-          Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) return;
+    const planeHit = new THREE.Vector3();
+    const setPointerRay = (event: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
+      if (!rect.width || !rect.height) return false;
       pointer.set(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,
         -((event.clientY - rect.top) / rect.height) * 2 + 1,
       );
       camera.updateMatrixWorld();
       kitchenGroupRef.current?.updateWorldMatrix(true, true);
+      sinkInstallationRef.current?.group.updateWorldMatrix(true, true);
       raycaster.setFromCamera(pointer, camera);
+      return true;
+    };
+    let clickStart: { pointerId: number; x: number; y: number } | null = null;
+    const onSelectionPointerDown = (event: PointerEvent) => {
+      const training = sinkInstallationRef.current;
+      if (modeRef.current === 'game' && installationActiveRef.current) {
+        clickStart = null;
+        if (!training || training.locked || training.drag || !event.isPrimary || event.button !== 0 || !setPointerRay(event)) return;
+        const [hit] = raycaster.intersectObjects([...selectableObjectsRef.current, ...training.meshes].filter(isObjectVisible), false);
+        if (!hit || !training.meshes.includes(hit.object) || !raycaster.ray.intersectPlane(training.plane, planeHit)) return;
+        training.drag = {
+          pointerId: event.pointerId,
+          offset: training.clone.getWorldPosition(new THREE.Vector3()).sub(planeHit),
+          controlsEnabled: controls.enabled,
+        };
+        // This listener runs in capture phase, before OrbitControls' pointerdown.
+        controls.enabled = false;
+        targetCameraPosRef.current = null;
+        targetLookAtRef.current = null;
+        renderer.domElement.setPointerCapture(event.pointerId);
+        markInteraction();
+        return;
+      }
+      clickStart = modeRef.current === 'game' && event.isPrimary && event.button === 0
+        ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+        : null;
+    };
+    const onSelectionPointerMove = (event: PointerEvent) => {
+      const training = sinkInstallationRef.current;
+      if (training?.drag?.pointerId === event.pointerId) {
+        if (setPointerRay(event) && raycaster.ray.intersectPlane(training.plane, planeHit)) {
+          planeHit.add(training.drag.offset);
+          planeHit.y = training.targetPosition.y;
+          training.clone.position.copy(training.group.worldToLocal(planeHit));
+          markInteraction();
+        }
+        return;
+      }
+      if (clickStart && event.pointerId === clickStart.pointerId &&
+          Math.hypot(event.clientX - clickStart.x, event.clientY - clickStart.y) > 6) {
+        clickStart = null; // Orbit gestures must never submit an answer.
+      }
+    };
+    const onSelectionPointerUp = (event: PointerEvent) => {
+      const training = sinkInstallationRef.current;
+      if (training?.drag?.pointerId === event.pointerId) {
+        onSelectionPointerMove(event); // Include the final pointer coordinates.
+        stopSinkDrag(false);
+        if (training.locked || modeRef.current !== 'game' || !installationActiveRef.current) return;
+        const position = training.clone.getWorldPosition(new THREE.Vector3());
+        const correct = Math.hypot(position.x - training.targetPosition.x, position.z - training.targetPosition.z) <= training.tolerance;
+        if (correct) {
+          training.locked = true; // Synchronous protection before invoking React's callback.
+          new THREE.Matrix4().copy(training.group.matrixWorld).invert().multiply(training.targetMatrix)
+            .decompose(training.clone.position, training.clone.quaternion, training.clone.scale);
+          training.target.visible = false;
+        } else {
+          training.clone.position.copy(training.group.worldToLocal(training.stagingPosition.clone()));
+        }
+        markInteraction();
+        onInstallationDropRef.current?.(correct);
+        return;
+      }
+      const start = clickStart;
+      clickStart = null;
+      if (modeRef.current !== 'game' || installationActiveRef.current || !start || event.pointerId !== start.pointerId ||
+          Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) return;
+      if (!setPointerRay(event)) return;
       const [hit] = raycaster.intersectObjects(selectableObjectsRef.current.filter(isObjectVisible), false);
       if (hit) {
         markInteraction();
         onProductSelectRef.current?.(findProductId(hit.object) ?? 'other');
       }
     };
-    const onSelectionPointerCancel = () => { clickStart = null; };
-    renderer.domElement.addEventListener('pointerdown', onSelectionPointerDown);
+    const onSelectionPointerCancel = (event: PointerEvent) => {
+      clickStart = null;
+      if (sinkInstallationRef.current?.drag?.pointerId === event.pointerId) stopSinkDrag(true);
+    };
+    const onLostPointerCapture = (event: PointerEvent) => {
+      if (sinkInstallationRef.current?.drag?.pointerId === event.pointerId) stopSinkDrag(true);
+    };
+    renderer.domElement.addEventListener('pointerdown', onSelectionPointerDown, true);
     renderer.domElement.addEventListener('pointermove', onSelectionPointerMove);
     renderer.domElement.addEventListener('pointerup', onSelectionPointerUp);
     renderer.domElement.addEventListener('pointercancel', onSelectionPointerCancel);
+    renderer.domElement.addEventListener('lostpointercapture', onLostPointerCapture);
 
     // Interaction listeners to drive throttling and wake up RAF
     const onInteraction = () => {
@@ -2588,7 +2765,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
         );
       }
 
-      controls.update();
+      if (!sinkInstallationRef.current?.drag) controls.update();
       renderer.render(scene, camera);
     };
 
@@ -2611,6 +2788,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
     // Complete Resource Cleanup on Unmount (Eliminate WebGL memory leaks)
     return () => {
+      clearSinkInstallation();
       // 1. Cancel animation frame
       if (animFrameIdRef.current) {
         cancelAnimationFrame(animFrameIdRef.current);
@@ -2619,10 +2797,11 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
       // 2. Disconnect observers & remove event listeners
       resizeObserver.disconnect();
-      renderer.domElement.removeEventListener('pointerdown', onSelectionPointerDown);
+      renderer.domElement.removeEventListener('pointerdown', onSelectionPointerDown, true);
       renderer.domElement.removeEventListener('pointermove', onSelectionPointerMove);
       renderer.domElement.removeEventListener('pointerup', onSelectionPointerUp);
       renderer.domElement.removeEventListener('pointercancel', onSelectionPointerCancel);
+      renderer.domElement.removeEventListener('lostpointercapture', onLostPointerCapture);
       clickStart = null;
       selectableObjectsRef.current = [];
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -2677,12 +2856,17 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       targetCameraPosRef.current = null;
       targetLookAtRef.current = null;
     };
-  }, [rebuildKitchenScene, disposeHierarchy, markInteraction]);
+  }, [rebuildKitchenScene, disposeHierarchy, markInteraction, clearSinkInstallation, stopSinkDrag]);
 
   // Re-run kitchen reconstruction on configuration change
   useEffect(() => {
     rebuildKitchenScene();
   }, [rebuildKitchenScene]);
+
+  useEffect(() => {
+    if (mode === 'game' && installationActive) createSinkInstallation();
+    else clearSinkInstallation();
+  }, [mode, installationActive, createSinkInstallation, clearSinkInstallation]);
 
   // Synchronously update camera projection matrix and renderer size across the 300ms sidebar transition
   useEffect(() => {
@@ -2745,7 +2929,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
   // Keyboard navigation on 3D canvas
   const handleCanvasKeyDown = (e: React.KeyboardEvent) => {
-    if (!controlsRef.current || !cameraRef.current) return;
+    if (!controlsRef.current || !cameraRef.current || sinkInstallationRef.current?.drag) return;
     const controls = controlsRef.current;
     markInteraction();
 

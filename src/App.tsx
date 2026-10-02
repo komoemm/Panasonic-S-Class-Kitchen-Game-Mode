@@ -34,16 +34,18 @@ export default function App() {
   const [appMode, setAppMode] = useState<AppMode>('explore');
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
   const [score, setScore] = useState(0);
-  const [gameStatus, setGameStatus] = useState<'idle' | 'playing' | 'complete'>('idle');
+  const [gameStatus, setGameStatus] = useState<'idle' | 'playing' | 'identification-complete' | 'complete'>('idle');
+  const [gamePhase, setGamePhase] = useState<'identification' | 'installation'>('identification');
   const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null);
   const [availableProductIds, setAvailableProductIds] = useState<string[] | null>(null);
   // Synchronous action lock also protects answers/Next before React commits an update.
   const taskPhaseRef = useRef<'inactive' | 'ready' | 'answered' | 'advancing'>('inactive');
+  const modeButtonTouchRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const currentTask = IDENTIFY_TASKS[currentTaskIndex];
 
   useEffect(() => {
     taskPhaseRef.current = appMode === 'game' && gameStatus === 'playing' ? 'ready' : 'inactive';
-  }, [appMode, currentTaskIndex, gameStatus]);
+  }, [appMode, currentTaskIndex, gameStatus, gamePhase]);
 
   // Default initial configuration
   const [config, setConfig] = useState<KitchenConfig>({
@@ -73,6 +75,7 @@ export default function App() {
     setCurrentTaskIndex(0);
     setScore(0);
     setFeedback(null);
+    setGamePhase('identification');
     setGameStatus('playing');
     setAppMode('game');
   };
@@ -81,11 +84,30 @@ export default function App() {
     taskPhaseRef.current = 'inactive';
     setAppMode('explore');
     setGameStatus('idle');
+    setGamePhase('identification');
     setFeedback(null);
   };
 
+  const handleModeButtonClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    // Touch is handled on pointerup: browsers can omit the synthesized click after a drag.
+    const nativeEvent = event.nativeEvent as PointerEvent & { sourceCapabilities?: { firesTouchEvents: boolean } };
+    if (nativeEvent.pointerType === 'touch' || nativeEvent.sourceCapabilities?.firesTouchEvents) return;
+    if (appMode === 'explore') handleStartGame();
+    else handleReturnToExplore();
+  };
+
+  const handleModeButtonPointerUp = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const start = modeButtonTouchRef.current;
+    modeButtonTouchRef.current = null;
+    if (event.pointerType !== 'touch' || !start || event.pointerId !== start.pointerId ||
+      Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) return;
+    if (appMode === 'explore') handleStartGame();
+    else handleReturnToExplore();
+  };
+
   const handleProductSelect = useCallback((productId: string) => {
-    if (appMode !== 'game' || gameStatus !== 'playing' || taskPhaseRef.current !== 'ready') return;
+    if (appMode !== 'game' || gamePhase !== 'identification' ||
+      gameStatus !== 'playing' || taskPhaseRef.current !== 'ready') return;
     if (productId !== currentTask.productId) {
       setFeedback('wrong');
       return;
@@ -93,16 +115,44 @@ export default function App() {
     taskPhaseRef.current = 'answered';
     setScore((previous) => previous + currentTask.points);
     setFeedback('correct');
-    if (currentTaskIndex === IDENTIFY_TASKS.length - 1) setGameStatus('complete');
-  }, [appMode, gameStatus, currentTask, currentTaskIndex]);
+    if (currentTaskIndex === IDENTIFY_TASKS.length - 1) setGameStatus('identification-complete');
+  }, [appMode, gamePhase, gameStatus, currentTask, currentTaskIndex]);
 
   const handleNextTask = () => {
-    if (appMode !== 'game' || gameStatus !== 'playing' ||
+    if (appMode !== 'game' || gamePhase !== 'identification' || gameStatus !== 'playing' ||
       taskPhaseRef.current !== 'answered' || currentTaskIndex >= IDENTIFY_TASKS.length - 1) return;
     taskPhaseRef.current = 'advancing';
     setFeedback(null);
     setCurrentTaskIndex((previous) => previous + 1);
   };
+
+  const handleStartInstallation = () => {
+    if (appMode !== 'game' || gameStatus !== 'identification-complete' ||
+      taskPhaseRef.current !== 'inactive') return;
+    taskPhaseRef.current = 'advancing';
+    setFeedback(null);
+    setGamePhase('installation');
+    setGameStatus('playing');
+  };
+
+  const handleInstallationDrop = useCallback((correct: boolean) => {
+    if (appMode !== 'game' || gamePhase !== 'installation' ||
+      gameStatus !== 'playing' || taskPhaseRef.current !== 'ready') return;
+    if (!correct) {
+      setFeedback('wrong');
+      return;
+    }
+    taskPhaseRef.current = 'answered';
+    setFeedback('correct');
+    setScore((previous) => previous + 100);
+    setGameStatus('complete');
+  }, [appMode, gamePhase, gameStatus]);
+
+  const installationActive = appMode === 'game' && gamePhase === 'installation' && gameStatus === 'playing';
+  const instruction = gameStatus === 'complete' ? t.game_complete :
+    gameStatus === 'identification-complete' ? t.game_identification_complete :
+    gamePhase === 'installation' ? t.game_install_sink : t[currentTask.instructionKey];
+  const trainingHint = gamePhase === 'installation' ? t.game_drag_sink_hint : t.game_click_hint;
 
   return (
     <div className="min-h-screen flex flex-col bg-[#080c15] text-slate-100 selection:bg-[#00a86b] selection:text-white">
@@ -116,19 +166,19 @@ export default function App() {
       />
 
       {/* React training HUD; the Three.js viewport stays mounted below. */}
-      <section aria-label={t.game_training} className="max-w-[1720px] w-full mx-auto px-3 sm:px-5 lg:px-6 pt-4">
+      <section aria-label={gamePhase === 'installation' ? t.game_installation_training : t.game_training} className="max-w-[1720px] w-full mx-auto px-3 sm:px-5 lg:px-6 pt-4">
         <div className="flex flex-col items-start gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between rounded-xl border border-slate-700 bg-slate-900/90 px-4 py-3">
           <div>
-            <p className="text-xs font-bold tracking-widest text-emerald-400">{t.game_training}</p>
+            <p className="text-xs font-bold tracking-widest text-emerald-400">{gamePhase === 'installation' ? t.game_installation_training : t.game_training}</p>
             {appMode === 'game' && (
               <>
-                {gameStatus !== 'complete' && (
+                {gameStatus === 'playing' && (
                   <p className="mt-1 text-xs font-semibold text-slate-400" id="game-progress">
-                    {t.game_task} {currentTaskIndex + 1} / {IDENTIFY_TASKS.length}
+                    {t.game_task} {gamePhase === 'installation' ? '1 / 1' : `${currentTaskIndex + 1} / ${IDENTIFY_TASKS.length}`}
                   </p>
                 )}
                 <h2 className="mt-1 text-lg font-bold" id="game-task">
-                  {gameStatus === 'complete' ? t.game_complete : t[currentTask.instructionKey]}
+                  {instruction}
                 </h2>
               </>
             )}
@@ -139,29 +189,49 @@ export default function App() {
           {appMode === 'game' && (
             <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-4">
               <p className="font-semibold" id="game-score">{t.game_score}: {score}</p>
-              {gameStatus === 'complete' && (
+              {(gameStatus === 'identification-complete' || gamePhase === 'installation') && (
                 <p className="font-semibold" id="game-products-identified">
                   {t.game_products_identified}: {IDENTIFY_TASKS.length} / {IDENTIFY_TASKS.length}
                 </p>
               )}
+              {gameStatus === 'complete' && (
+                <p className="font-semibold" id="game-products-installed">{t.game_products_installed}: 1 / 1</p>
+              )}
               <p role="status" aria-live="polite" aria-atomic="true" id="game-feedback"
                 className={`grid min-h-[2.5rem] sm:min-h-0 font-bold ${feedback === 'wrong' ? 'text-red-400' : feedback === 'correct' ? 'text-emerald-400' : 'text-slate-300'}`}>
                 <span className="col-start-1 row-start-1">
-                  {feedback === 'correct' ? `✓ ${t.game_correct} +${currentTask.points}` : feedback === 'wrong' ? `✕ ${t.game_try_again}` : t.game_click_hint}
+                  {feedback === 'correct' ? `✓ ${t.game_correct} +${gamePhase === 'installation' ? 100 : currentTask.points}` : feedback === 'wrong' ? `✕ ${t.game_try_again}` : trainingHint}
                 </span>
-                <span aria-hidden="true" className="invisible col-start-1 row-start-1">{t.game_click_hint}</span>
+                <span aria-hidden="true" className="invisible col-start-1 row-start-1">{trainingHint}</span>
               </p>
-              {gameStatus === 'playing' && (
+              {gameStatus === 'playing' && gamePhase === 'identification' && (
                 <button type="button" id="next-task-btn" onClick={handleNextTask}
                   disabled={feedback !== 'correct'} aria-hidden={feedback !== 'correct'}
                   className={`rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ${feedback !== 'correct' ? 'invisible' : ''}`}>
                   {t.game_next_task}
                 </button>
               )}
+              {gameStatus === 'identification-complete' && (
+                <button type="button" id="start-installation-btn" onClick={handleStartInstallation}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
+                  {t.game_start_installation}
+                </button>
+              )}
             </div>
           )}
           <button type="button" id={appMode === 'explore' ? 'start-game-btn' : 'return-explore-btn'}
-            onClick={appMode === 'explore' ? handleStartGame : handleReturnToExplore}
+            onClick={handleModeButtonClick}
+            onPointerDown={(event) => {
+              modeButtonTouchRef.current = event.pointerType === 'touch'
+                ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY } : null;
+            }}
+            onPointerMove={(event) => {
+              const start = modeButtonTouchRef.current;
+              if (start && event.pointerId === start.pointerId &&
+                Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) modeButtonTouchRef.current = null;
+            }}
+            onPointerUp={handleModeButtonPointerUp}
+            onPointerCancel={() => { modeButtonTouchRef.current = null; }}
             disabled={appMode === 'explore' && !canStartGame}
             aria-describedby={appMode === 'explore' && availableProductIds !== null && !canStartGame ? 'game-unavailable' : undefined}
             className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
@@ -182,6 +252,8 @@ export default function App() {
               config={config}
               lang={lang}
               mode={appMode}
+              installationActive={installationActive}
+              onInstallationDrop={handleInstallationDrop}
               onProductSelect={handleProductSelect}
               onAvailableProductsChange={setAvailableProductIds}
               activeFocus={appMode === 'explore' && currentStep === 6 ? 'sink' : undefined}
