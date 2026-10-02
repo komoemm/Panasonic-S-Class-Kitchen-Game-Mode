@@ -5,6 +5,8 @@ import { TopBar } from './components/TopBar';
 import { StepWizard } from './components/StepWizard';
 import { KitchenViewportSkeleton } from './components/KitchenViewportSkeleton';
 import { TRANSLATIONS } from './i18n/translations';
+import { KNOWLEDGE_QUESTIONS } from './data/sClassGameContent';
+import { ProductKnowledgeCard } from './components/ProductKnowledgeCard';
 
 type IdentifyProductId = 'sink' | 'cooktop' | 'rangeHood';
 type IdentifyTask = {
@@ -46,9 +48,10 @@ export default function App() {
   const [appMode, setAppMode] = useState<AppMode>('explore');
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
   const [currentInstallationTaskIndex, setCurrentInstallationTaskIndex] = useState(0);
+  const [currentKnowledgeIndex, setCurrentKnowledgeIndex] = useState(0);
   const [score, setScore] = useState(0);
-  const [gameStatus, setGameStatus] = useState<'idle' | 'playing' | 'identification-complete' | 'complete'>('idle');
-  const [gamePhase, setGamePhase] = useState<'identification' | 'installation'>('identification');
+  const [gameStatus, setGameStatus] = useState<'idle' | 'playing' | 'identification-complete' | 'installation-complete' | 'complete'>('idle');
+  const [gamePhase, setGamePhase] = useState<'identification' | 'installation' | 'knowledge'>('identification');
   const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null);
   const [availableProductIds, setAvailableProductIds] = useState<string[] | null>(null);
   // Synchronous action lock also protects answers/Next before React commits an update.
@@ -56,10 +59,14 @@ export default function App() {
   const trainingButtonTouchRef = useRef<{ pointerId: number; x: number; y: number; button: HTMLButtonElement } | null>(null);
   const currentTask = IDENTIFY_TASKS[currentTaskIndex];
   const currentInstallationTask = INSTALLATION_TASKS[currentInstallationTaskIndex];
+  const currentKnowledgeQuestion = KNOWLEDGE_QUESTIONS[currentKnowledgeIndex];
+  const activeKnowledgeQuestionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    activeKnowledgeQuestionIdRef.current = appMode === 'game' && gamePhase === 'knowledge' && gameStatus === 'playing'
+      ? currentKnowledgeQuestion.id : null;
     taskPhaseRef.current = appMode === 'game' && gameStatus === 'playing' ? 'ready' : 'inactive';
-  }, [appMode, currentTaskIndex, currentInstallationTaskIndex, gameStatus, gamePhase]);
+  }, [appMode, currentTaskIndex, currentInstallationTaskIndex, currentKnowledgeIndex, gameStatus, gamePhase]);
 
   // Default initial configuration
   const [config, setConfig] = useState<KitchenConfig>({
@@ -88,6 +95,8 @@ export default function App() {
     taskPhaseRef.current = 'inactive';
     setCurrentTaskIndex(0);
     setCurrentInstallationTaskIndex(0);
+    setCurrentKnowledgeIndex(0);
+    activeKnowledgeQuestionIdRef.current = null;
     setScore(0);
     setFeedback(null);
     setGamePhase('identification');
@@ -98,6 +107,8 @@ export default function App() {
   const handleReturnToExplore = () => {
     taskPhaseRef.current = 'inactive';
     setCurrentInstallationTaskIndex(0);
+    setCurrentKnowledgeIndex(0);
+    activeKnowledgeQuestionIdRef.current = null;
     setAppMode('explore');
     setGameStatus('idle');
     setGamePhase('identification');
@@ -176,7 +187,7 @@ export default function App() {
     taskPhaseRef.current = 'answered';
     setFeedback('correct');
     setScore((previous) => previous + currentInstallationTask.points);
-    if (currentInstallationTaskIndex === INSTALLATION_TASKS.length - 1) setGameStatus('complete');
+    if (currentInstallationTaskIndex === INSTALLATION_TASKS.length - 1) setGameStatus('installation-complete');
   }, [appMode, gamePhase, gameStatus, currentInstallationTask, currentInstallationTaskIndex]);
 
   const handleNextInstallation = () => {
@@ -187,12 +198,55 @@ export default function App() {
     setCurrentInstallationTaskIndex((previous) => previous + 1);
   };
 
+  const handleStartKnowledge = () => {
+    if (appMode !== 'game' || gamePhase !== 'installation' || gameStatus !== 'installation-complete' ||
+      taskPhaseRef.current !== 'inactive') return;
+    taskPhaseRef.current = 'advancing';
+    setCurrentKnowledgeIndex(0);
+    setFeedback(null);
+    setGamePhase('knowledge');
+    setGameStatus('playing');
+  };
+
+  const handleKnowledgeAnswer = (questionId: string, answerId: string) => {
+    if (appMode !== 'game' || gamePhase !== 'knowledge' || gameStatus !== 'playing' ||
+      taskPhaseRef.current !== 'ready' || questionId !== activeKnowledgeQuestionIdRef.current ||
+      currentKnowledgeQuestion.id !== activeKnowledgeQuestionIdRef.current) return;
+    const answer = currentKnowledgeQuestion.answers.find((choice) => choice.id === answerId);
+    if (!answer) return;
+    if (!answer.correct) {
+      setFeedback('wrong');
+      return;
+    }
+    taskPhaseRef.current = 'answered';
+    setFeedback('correct');
+    setScore((previous) => previous + currentKnowledgeQuestion.points);
+    if (currentKnowledgeIndex === KNOWLEDGE_QUESTIONS.length - 1) setGameStatus('complete');
+  };
+
+  const handleNextKnowledge = () => {
+    if (appMode !== 'game' || gamePhase !== 'knowledge' || gameStatus !== 'playing' ||
+      taskPhaseRef.current !== 'answered' || currentKnowledgeQuestion.id !== activeKnowledgeQuestionIdRef.current ||
+      currentKnowledgeIndex >= KNOWLEDGE_QUESTIONS.length - 1) return;
+    taskPhaseRef.current = 'advancing';
+    activeKnowledgeQuestionIdRef.current = null;
+    setFeedback(null);
+    setCurrentKnowledgeIndex((previous) => previous + 1);
+  };
+
   const installationTask = appMode === 'game' && gamePhase === 'installation' &&
     gameStatus === 'playing' && feedback !== 'correct' ? currentInstallationTask : null;
   const instruction = gameStatus === 'complete' ? t.game_complete :
     gameStatus === 'identification-complete' ? t.game_identification_complete :
+    gameStatus === 'installation-complete' ? t.game_installation_complete :
+    gamePhase === 'knowledge' ? t[currentKnowledgeQuestion.titleKey] :
     gamePhase === 'installation' ? t[currentInstallationTask.instructionKey] : t[currentTask.instructionKey];
-  const trainingHint = gamePhase === 'installation' ? t.game_drag_product_hint : t.game_click_hint;
+  const trainingTitle = gamePhase === 'knowledge' ? t.game_product_knowledge :
+    gamePhase === 'installation' ? t.game_installation_training : t.game_training;
+  const trainingHint = gamePhase === 'knowledge' ? t.game_knowledge_hint :
+    gamePhase === 'installation' ? t.game_drag_product_hint : t.game_click_hint;
+  const taskPoints = gamePhase === 'knowledge' ? currentKnowledgeQuestion.points :
+    gamePhase === 'installation' ? currentInstallationTask.points : currentTask.points;
 
   return (
     <div className="min-h-screen flex flex-col bg-[#080c15] text-slate-100 selection:bg-[#00a86b] selection:text-white">
@@ -206,16 +260,17 @@ export default function App() {
       />
 
       {/* React training HUD; the Three.js viewport stays mounted below. */}
-      <section aria-label={gamePhase === 'installation' ? t.game_installation_training : t.game_training} className="max-w-[1720px] w-full mx-auto px-3 sm:px-5 lg:px-6 pt-4">
+      <section aria-label={trainingTitle} className="max-w-[1720px] w-full mx-auto px-3 sm:px-5 lg:px-6 pt-4">
         <div className="flex flex-col items-start gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between rounded-xl border border-slate-700 bg-slate-900/90 px-4 py-3">
           <div>
-            <p className="text-xs font-bold tracking-widest text-emerald-400">{gamePhase === 'installation' ? t.game_installation_training : t.game_training}</p>
+            <p className="text-xs font-bold tracking-widest text-emerald-400">{trainingTitle}</p>
             {appMode === 'game' && (
               <>
                 {gameStatus === 'playing' && (
                   <p className="mt-1 text-xs font-semibold text-slate-400" id="game-progress">
-                    {t.game_task} {gamePhase === 'installation'
-                      ? `${currentInstallationTaskIndex + 1} / ${INSTALLATION_TASKS.length}`
+                    {gamePhase === 'knowledge' ? t.game_knowledge : t.game_task} {gamePhase === 'knowledge'
+                      ? `${currentKnowledgeIndex + 1} / ${KNOWLEDGE_QUESTIONS.length}`
+                      : gamePhase === 'installation' ? `${currentInstallationTaskIndex + 1} / ${INSTALLATION_TASKS.length}`
                       : `${currentTaskIndex + 1} / ${IDENTIFY_TASKS.length}`}
                   </p>
                 )}
@@ -231,18 +286,21 @@ export default function App() {
           {appMode === 'game' && (
             <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-4">
               <p className="font-semibold" id="game-score">{t.game_score}: {score}</p>
-              {(gameStatus === 'identification-complete' || gamePhase === 'installation') && (
+              {(gameStatus === 'identification-complete' || gamePhase !== 'identification') && (
                 <p className="font-semibold" id="game-products-identified">
                   {t.game_products_identified}: {IDENTIFY_TASKS.length} / {IDENTIFY_TASKS.length}
                 </p>
               )}
-              {gameStatus === 'complete' && (
+              {(gameStatus === 'installation-complete' || gamePhase === 'knowledge') && (
                 <p className="font-semibold" id="game-products-installed">{t.game_products_installed}: {INSTALLATION_TASKS.length} / {INSTALLATION_TASKS.length}</p>
+              )}
+              {gameStatus === 'complete' && (
+                <p className="font-semibold" id="game-knowledge-count">{t.game_knowledge}: {KNOWLEDGE_QUESTIONS.length} / {KNOWLEDGE_QUESTIONS.length}</p>
               )}
               <p role="status" aria-live="polite" aria-atomic="true" id="game-feedback"
                 className={`grid min-h-[2.5rem] sm:min-h-0 font-bold ${feedback === 'wrong' ? 'text-red-400' : feedback === 'correct' ? 'text-emerald-400' : 'text-slate-300'}`}>
                 <span className="col-start-1 row-start-1">
-                  {feedback === 'correct' ? `✓ ${t.game_correct} +${gamePhase === 'installation' ? currentInstallationTask.points : currentTask.points}` : feedback === 'wrong' ? `✕ ${t.game_try_again}` : trainingHint}
+                  {feedback === 'correct' ? `✓ ${t.game_correct} +${taskPoints}` : feedback === 'wrong' ? `✕ ${t.game_try_again}` : trainingHint}
                 </span>
                 <span aria-hidden="true" className="invisible col-start-1 row-start-1">{trainingHint}</span>
               </p>
@@ -257,6 +315,12 @@ export default function App() {
                 <button type="button" id="start-installation-btn" onClick={handleStartInstallation}
                   className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
                   {t.game_start_installation}
+                </button>
+              )}
+              {gameStatus === 'installation-complete' && (
+                <button type="button" id="start-knowledge-btn" {...trainingButtonEvents(handleStartKnowledge)}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
+                  {t.game_start_knowledge}
                 </button>
               )}
               {gameStatus === 'playing' && gamePhase === 'installation' && currentInstallationTaskIndex < INSTALLATION_TASKS.length - 1 && (
@@ -280,6 +344,12 @@ export default function App() {
 
       {/* Main Responsive Layout */}
       <main className="flex-1 max-w-[1720px] w-full mx-auto p-3 sm:p-5 lg:p-6 flex flex-col lg:flex-row gap-4 lg:gap-6 relative overflow-x-hidden">
+        {appMode === 'game' && gamePhase === 'knowledge' && gameStatus === 'playing' && (
+          <ProductKnowledgeCard question={currentKnowledgeQuestion} lang={lang} feedback={feedback}
+            hasNext={currentKnowledgeIndex < KNOWLEDGE_QUESTIONS.length - 1}
+            onAnswer={(answerId) => handleKnowledgeAnswer(currentKnowledgeQuestion.id, answerId)}
+            onNext={handleNextKnowledge} buttonEvents={trainingButtonEvents} />
+        )}
         {/* Left / Center 3D Interactive Viewport with Suspense Skeleton */}
         <section 
           aria-label={lang === 'ja' ? '3Dモデル表示領域' : '3D Model Viewport Area'}
