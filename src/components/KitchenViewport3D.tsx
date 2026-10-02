@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { AppMode, KitchenConfig, CameraPresetId, Language } from '../types';
+import { AppMode, KitchenConfig, CameraPresetId, Language, ProductInstallationTask } from '../types';
 import { CABINET_FINISHES } from '../data/configOptions';
 import { TRANSLATIONS } from '../i18n/translations';
 import { 
@@ -44,7 +44,8 @@ function isObjectVisible(object: THREE.Object3D): boolean {
   return true;
 }
 
-type SinkInstallation = {
+type ProductInstallation = {
+  productId: ProductInstallationTask['productId'];
   original: THREE.Object3D;
   originalVisible: boolean;
   group: THREE.Group;
@@ -64,8 +65,8 @@ interface KitchenViewport3DProps {
   config: KitchenConfig;
   lang: Language;
   mode?: AppMode;
-  installationActive?: boolean;
-  onInstallationDrop?: (correct: boolean) => void;
+  installationTask?: ProductInstallationTask | null;
+  onInstallationDrop?: (productId: ProductInstallationTask['productId'], correct: boolean) => void;
   onProductSelect?: (productId: string) => void;
   onAvailableProductsChange?: (productIds: string[]) => void;
   activeFocus?: 'sink' | 'cooktop' | 'hood' | 'perspective' | CameraPresetId;
@@ -80,7 +81,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
   config,
   lang,
   mode = 'explore',
-  installationActive = false,
+  installationTask = null,
   onInstallationDrop,
   onProductSelect,
   onAvailableProductsChange,
@@ -120,18 +121,18 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
   const modeRef = useRef(mode);
   const onProductSelectRef = useRef(onProductSelect);
   const onAvailableProductsChangeRef = useRef(onAvailableProductsChange);
-  const installationActiveRef = useRef(installationActive);
+  const installationTaskRef = useRef(installationTask);
   const onInstallationDropRef = useRef(onInstallationDrop);
-  const sinkInstallationRef = useRef<SinkInstallation | null>(null);
+  const installationRef = useRef<ProductInstallation | null>(null);
 
   // Keep React callbacks current without recreating the WebGL world on game updates.
   useEffect(() => {
     modeRef.current = mode;
     onProductSelectRef.current = onProductSelect;
     onAvailableProductsChangeRef.current = onAvailableProductsChange;
-    installationActiveRef.current = installationActive;
+    installationTaskRef.current = installationTask;
     onInstallationDropRef.current = onInstallationDrop;
-  }, [mode, onProductSelect, onAvailableProductsChange, installationActive, onInstallationDrop]);
+  }, [mode, onProductSelect, onAvailableProductsChange, installationTask, onInstallationDrop]);
 
   // Dynamic mesh & group references for animations, exploded views & isolation
   const kitchenGroupRef = useRef<THREE.Group | null>(null);
@@ -182,8 +183,8 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     needsRenderRef.current = true;
   }, []);
 
-  const stopSinkDrag = useCallback((resetPosition: boolean) => {
-    const training = sinkInstallationRef.current;
+  const stopProductDrag = useCallback((resetPosition: boolean) => {
+    const training = installationRef.current;
     if (!training?.drag) return;
     const drag = training.drag;
     training.drag = null; // Clear before releasing capture (which can emit lostpointercapture).
@@ -194,31 +195,31 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     markInteraction();
   }, [markInteraction]);
 
-  const clearSinkInstallation = useCallback(() => {
-    const training = sinkInstallationRef.current;
+  const clearProductInstallation = useCallback(() => {
+    const training = installationRef.current;
     if (!training) return;
-    stopSinkDrag(false);
-    sinkInstallationRef.current = null;
+    stopProductDrag(false);
+    installationRef.current = null;
     training.original.visible = training.originalVisible;
     training.group.removeFromParent();
     training.group.clear();
-    // clone(true) shares the real sink's geometry/materials; only the helper owns resources.
+    // clone(true) shares product geometry/materials; only the helper owns resources.
     training.target.geometry.dispose();
     training.target.material.dispose();
     markInteraction();
-  }, [stopSinkDrag, markInteraction]);
+  }, [stopProductDrag, markInteraction]);
 
-  const createSinkInstallation = useCallback(() => {
+  const createProductInstallation = useCallback((task: ProductInstallationTask) => {
     const scene = sceneRef.current;
     const kitchen = kitchenGroupRef.current;
-    if (!scene || !kitchen || sinkInstallationRef.current) return;
-    let sink: THREE.Object3D | undefined;
-    kitchen.traverse((object) => { if (object.userData.productId === 'sink') sink = object; });
-    if (!sink) return;
+    if (!scene || !kitchen || installationRef.current) return;
+    let product: THREE.Object3D | undefined;
+    kitchen.traverse((object) => { if (object.userData.productId === task.productId) product = object; });
+    if (!product) return;
     kitchen.updateWorldMatrix(true, true);
-    const targetMatrix = sink.matrixWorld.clone();
+    const targetMatrix = product.matrixWorld.clone();
     const targetPosition = new THREE.Vector3().setFromMatrixPosition(targetMatrix);
-    const bounds = new THREE.Box3().setFromObject(sink);
+    const bounds = new THREE.Box3().setFromObject(product);
     const size = bounds.getSize(new THREE.Vector3());
     const kitchenBounds = new THREE.Box3().setFromObject(kitchen);
     const stagingPosition = targetPosition.clone();
@@ -235,11 +236,11 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     }
 
     const group = new THREE.Group();
-    group.name = 'sink-installation-training';
+    group.name = 'product-installation-training';
     scene.add(group);
     group.updateWorldMatrix(true, false);
-    const clone = sink.clone(true);
-    clone.name = 'training-sink';
+    const clone = product.clone(true);
+    clone.name = `training-${task.productId}`;
     // Convert the captured WORLD matrix into the temporary parent's local space.
     new THREE.Matrix4().copy(group.matrixWorld).invert().multiply(targetMatrix)
       .decompose(clone.position, clone.quaternion, clone.scale);
@@ -253,21 +254,21 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       new THREE.PlaneGeometry(size.x, size.z),
       new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }),
     );
-    target.name = 'sink-installation-target';
+    target.name = 'product-installation-target';
     target.rotation.x = -Math.PI / 2;
     const targetCenter = bounds.getCenter(new THREE.Vector3());
     targetCenter.y = targetPosition.y + 0.008;
     target.position.copy(group.worldToLocal(targetCenter));
     group.add(target);
-    sinkInstallationRef.current = {
-      original: sink, originalVisible: sink.visible, group, clone, meshes, target,
+    installationRef.current = {
+      productId: task.productId, original: product, originalVisible: product.visible, group, clone, meshes, target,
       targetMatrix, targetPosition, stagingPosition,
       plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -targetPosition.y),
-      // 20% of the smaller measured footprint dimension (about 0.1 m for this sink).
+      // 20% of this live product's smaller measured footprint dimension.
       tolerance: Math.min(size.x, size.z) * 0.2,
       locked: false, drag: null,
     };
-    sink.visible = false;
+    product.visible = false;
     markInteraction();
   }, [markInteraction]);
 
@@ -809,7 +810,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
   const rebuildKitchenScene = useCallback(() => {
     if (!sceneRef.current) return;
     const scene = sceneRef.current;
-    clearSinkInstallation(); // Remove shared clones BEFORE disposing the previous kitchen.
+    clearProductInstallation(); // Remove shared clones BEFORE disposing the previous kitchen.
     selectableObjectsRef.current = [];
 
     // Remove existing kitchen group if any
@@ -2310,9 +2311,9 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     onAvailableProductsChangeRef.current?.([...productIds]);
 
     scene.add(kitchen);
-    if (modeRef.current === 'game' && installationActiveRef.current) createSinkInstallation();
+    if (modeRef.current === 'game' && installationTaskRef.current) createProductInstallation(installationTaskRef.current);
     markInteraction();
-  }, [config, disposeHierarchy, markInteraction, clearSinkInstallation, createSinkInstallation]);
+  }, [config, disposeHierarchy, markInteraction, clearProductInstallation, createProductInstallation]);
 
   // Three.js Scene Setup, Interactive Throttling & Resource Cleanup
   useEffect(() => {
@@ -2431,14 +2432,14 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       );
       camera.updateMatrixWorld();
       kitchenGroupRef.current?.updateWorldMatrix(true, true);
-      sinkInstallationRef.current?.group.updateWorldMatrix(true, true);
+      installationRef.current?.group.updateWorldMatrix(true, true);
       raycaster.setFromCamera(pointer, camera);
       return true;
     };
     let clickStart: { pointerId: number; x: number; y: number } | null = null;
     const onSelectionPointerDown = (event: PointerEvent) => {
-      const training = sinkInstallationRef.current;
-      if (modeRef.current === 'game' && installationActiveRef.current) {
+      const training = installationRef.current;
+      if (modeRef.current === 'game' && installationTaskRef.current) {
         clickStart = null;
         if (!training || training.locked || training.drag || !event.isPrimary || event.button !== 0 || !setPointerRay(event)) return;
         const [hit] = raycaster.intersectObjects([...selectableObjectsRef.current, ...training.meshes].filter(isObjectVisible), false);
@@ -2461,7 +2462,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
         : null;
     };
     const onSelectionPointerMove = (event: PointerEvent) => {
-      const training = sinkInstallationRef.current;
+      const training = installationRef.current;
       if (training?.drag?.pointerId === event.pointerId) {
         if (setPointerRay(event) && raycaster.ray.intersectPlane(training.plane, planeHit)) {
           planeHit.add(training.drag.offset);
@@ -2477,11 +2478,11 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       }
     };
     const onSelectionPointerUp = (event: PointerEvent) => {
-      const training = sinkInstallationRef.current;
+      const training = installationRef.current;
       if (training?.drag?.pointerId === event.pointerId) {
         onSelectionPointerMove(event); // Include the final pointer coordinates.
-        stopSinkDrag(false);
-        if (training.locked || modeRef.current !== 'game' || !installationActiveRef.current) return;
+        stopProductDrag(false);
+        if (training.locked || modeRef.current !== 'game' || !installationTaskRef.current) return;
         const position = training.clone.getWorldPosition(new THREE.Vector3());
         const correct = Math.hypot(position.x - training.targetPosition.x, position.z - training.targetPosition.z) <= training.tolerance;
         if (correct) {
@@ -2493,12 +2494,12 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
           training.clone.position.copy(training.group.worldToLocal(training.stagingPosition.clone()));
         }
         markInteraction();
-        onInstallationDropRef.current?.(correct);
+        onInstallationDropRef.current?.(training.productId, correct);
         return;
       }
       const start = clickStart;
       clickStart = null;
-      if (modeRef.current !== 'game' || installationActiveRef.current || !start || event.pointerId !== start.pointerId ||
+      if (modeRef.current !== 'game' || installationTaskRef.current || !start || event.pointerId !== start.pointerId ||
           Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) return;
       if (!setPointerRay(event)) return;
       const [hit] = raycaster.intersectObjects(selectableObjectsRef.current.filter(isObjectVisible), false);
@@ -2509,10 +2510,10 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     };
     const onSelectionPointerCancel = (event: PointerEvent) => {
       clickStart = null;
-      if (sinkInstallationRef.current?.drag?.pointerId === event.pointerId) stopSinkDrag(true);
+      if (installationRef.current?.drag?.pointerId === event.pointerId) stopProductDrag(true);
     };
     const onLostPointerCapture = (event: PointerEvent) => {
-      if (sinkInstallationRef.current?.drag?.pointerId === event.pointerId) stopSinkDrag(true);
+      if (installationRef.current?.drag?.pointerId === event.pointerId) stopProductDrag(true);
     };
     renderer.domElement.addEventListener('pointerdown', onSelectionPointerDown, true);
     renderer.domElement.addEventListener('pointermove', onSelectionPointerMove);
@@ -2765,7 +2766,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
         );
       }
 
-      if (!sinkInstallationRef.current?.drag) controls.update();
+      if (!installationRef.current?.drag) controls.update();
       renderer.render(scene, camera);
     };
 
@@ -2788,7 +2789,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
     // Complete Resource Cleanup on Unmount (Eliminate WebGL memory leaks)
     return () => {
-      clearSinkInstallation();
+      clearProductInstallation();
       // 1. Cancel animation frame
       if (animFrameIdRef.current) {
         cancelAnimationFrame(animFrameIdRef.current);
@@ -2856,7 +2857,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       targetCameraPosRef.current = null;
       targetLookAtRef.current = null;
     };
-  }, [rebuildKitchenScene, disposeHierarchy, markInteraction, clearSinkInstallation, stopSinkDrag]);
+  }, [rebuildKitchenScene, disposeHierarchy, markInteraction, clearProductInstallation, stopProductDrag]);
 
   // Re-run kitchen reconstruction on configuration change
   useEffect(() => {
@@ -2864,9 +2865,9 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
   }, [rebuildKitchenScene]);
 
   useEffect(() => {
-    if (mode === 'game' && installationActive) createSinkInstallation();
-    else clearSinkInstallation();
-  }, [mode, installationActive, createSinkInstallation, clearSinkInstallation]);
+    clearProductInstallation();
+    if (mode === 'game' && installationTask) createProductInstallation(installationTask);
+  }, [mode, installationTask, createProductInstallation, clearProductInstallation]);
 
   // Synchronously update camera projection matrix and renderer size across the 300ms sidebar transition
   useEffect(() => {
@@ -2929,7 +2930,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
   // Keyboard navigation on 3D canvas
   const handleCanvasKeyDown = (e: React.KeyboardEvent) => {
-    if (!controlsRef.current || !cameraRef.current || sinkInstallationRef.current?.drag) return;
+    if (!controlsRef.current || !cameraRef.current || installationRef.current?.drag) return;
     const controls = controlsRef.current;
     markInteraction();
 
