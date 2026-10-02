@@ -46,6 +46,7 @@ function isObjectVisible(object: THREE.Object3D): boolean {
 
 type ProductInstallation = {
   productId: ProductInstallationTask['productId'];
+  placementOrientation: ProductInstallationTask['placementOrientation'];
   original: THREE.Object3D;
   originalVisible: boolean;
   group: THREE.Group;
@@ -223,16 +224,31 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     const size = bounds.getSize(new THREE.Vector3());
     const kitchenBounds = new THREE.Box3().setFromObject(kitchen);
     const stagingPosition = targetPosition.clone();
-    // In front of the kitchen at installation height, aligned toward the current view.
-    stagingPosition.x = kitchenBounds.getCenter(new THREE.Vector3()).x;
-    stagingPosition.z = Math.max(kitchenBounds.max.z, bounds.max.z) + size.z * 0.7;
+    const vertical = task.placementOrientation === 'vertical';
     const cameraPosition = cameraRef.current?.position;
     const viewTarget = controlsRef.current?.target;
-    if (cameraPosition && viewTarget && cameraPosition.z - viewTarget.z > 0.1) {
-      stagingPosition.x = THREE.MathUtils.clamp(
-        viewTarget.x + (stagingPosition.z - viewTarget.z) * (cameraPosition.x - viewTarget.x) / (cameraPosition.z - viewTarget.z),
-        kitchenBounds.min.x + size.x / 2, kitchenBounds.max.x - size.x / 2,
-      );
+    if (vertical) {
+      // Stage the measured footprint below its target, on the same wall plane.
+      // The product root need not be at its geometry's center (the Hood root is not).
+      const center = bounds.getCenter(new THREE.Vector3());
+      const stagingCenter = kitchenBounds.getCenter(new THREE.Vector3());
+      stagingCenter.y = Math.max(kitchenBounds.min.y + size.y / 2, bounds.min.y - size.y * 0.65);
+      if (cameraPosition && viewTarget && cameraPosition.z - viewTarget.z > 0.1) {
+        stagingCenter.x = viewTarget.x + (center.z - viewTarget.z) * (cameraPosition.x - viewTarget.x) / (cameraPosition.z - viewTarget.z);
+      }
+      stagingCenter.x = THREE.MathUtils.clamp(stagingCenter.x, kitchenBounds.min.x + size.x / 2, kitchenBounds.max.x - size.x / 2);
+      stagingPosition.x += stagingCenter.x - center.x;
+      stagingPosition.y += stagingCenter.y - center.y;
+    } else {
+      // In front of the kitchen at installation height, aligned toward the current view.
+      stagingPosition.x = kitchenBounds.getCenter(new THREE.Vector3()).x;
+      stagingPosition.z = Math.max(kitchenBounds.max.z, bounds.max.z) + size.z * 0.7;
+      if (cameraPosition && viewTarget && cameraPosition.z - viewTarget.z > 0.1) {
+        stagingPosition.x = THREE.MathUtils.clamp(
+          viewTarget.x + (stagingPosition.z - viewTarget.z) * (cameraPosition.x - viewTarget.x) / (cameraPosition.z - viewTarget.z),
+          kitchenBounds.min.x + size.x / 2, kitchenBounds.max.x - size.x / 2,
+        );
+      }
     }
 
     const group = new THREE.Group();
@@ -241,6 +257,18 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     group.updateWorldMatrix(true, false);
     const clone = product.clone(true);
     clone.name = `training-${task.productId}`;
+    // Three.js clones light targets separately; reconnect targets owned by this product.
+    const originals: THREE.Object3D[] = [];
+    const copies: THREE.Object3D[] = [];
+    product.traverse((object) => originals.push(object));
+    clone.traverse((object) => copies.push(object));
+    const copiesByOriginal = new Map(originals.map((object, index) => [object, copies[index]]));
+    originals.forEach((object, index) => {
+      if (object instanceof THREE.SpotLight || object instanceof THREE.DirectionalLight) {
+        const targetCopy = copiesByOriginal.get(object.target);
+        if (targetCopy) (copies[index] as THREE.SpotLight | THREE.DirectionalLight).target = targetCopy;
+      }
+    });
     // Convert the captured WORLD matrix into the temporary parent's local space.
     new THREE.Matrix4().copy(group.matrixWorld).invert().multiply(targetMatrix)
       .decompose(clone.position, clone.quaternion, clone.scale);
@@ -251,21 +279,28 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     clone.traverse((object) => { if ((object as THREE.Mesh).isMesh) meshes.push(object); });
 
     const target = new THREE.Mesh(
-      new THREE.PlaneGeometry(size.x, size.z),
+      new THREE.PlaneGeometry(size.x, vertical ? size.y : size.z),
       new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }),
     );
     target.name = 'product-installation-target';
-    target.rotation.x = -Math.PI / 2;
     const targetCenter = bounds.getCenter(new THREE.Vector3());
-    targetCenter.y = targetPosition.y + 0.008;
+    if (vertical) {
+      targetCenter.z = bounds.max.z + 0.008;
+    } else {
+      target.rotation.x = -Math.PI / 2;
+      targetCenter.y = targetPosition.y + 0.008;
+    }
     target.position.copy(group.worldToLocal(targetCenter));
     group.add(target);
     installationRef.current = {
-      productId: task.productId, original: product, originalVisible: product.visible, group, clone, meshes, target,
+      productId: task.productId, placementOrientation: task.placementOrientation,
+      original: product, originalVisible: product.visible, group, clone, meshes, target,
       targetMatrix, targetPosition, stagingPosition,
-      plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -targetPosition.y),
-      // 20% of this live product's smaller measured footprint dimension.
-      tolerance: Math.min(size.x, size.z) * 0.2,
+      plane: vertical
+        ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -targetPosition.z)
+        : new THREE.Plane(new THREE.Vector3(0, 1, 0), -targetPosition.y),
+      // 20% of this live product's smaller dimension on its placement plane.
+      tolerance: Math.min(size.x, vertical ? size.y : size.z) * 0.2,
       locked: false, drag: null,
     };
     product.visible = false;
@@ -2466,7 +2501,8 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       if (training?.drag?.pointerId === event.pointerId) {
         if (setPointerRay(event) && raycaster.ray.intersectPlane(training.plane, planeHit)) {
           planeHit.add(training.drag.offset);
-          planeHit.y = training.targetPosition.y;
+          if (training.placementOrientation === 'vertical') planeHit.z = training.targetPosition.z;
+          else planeHit.y = training.targetPosition.y;
           training.clone.position.copy(training.group.worldToLocal(planeHit));
           markInteraction();
         }
@@ -2484,7 +2520,10 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
         stopProductDrag(false);
         if (training.locked || modeRef.current !== 'game' || !installationTaskRef.current) return;
         const position = training.clone.getWorldPosition(new THREE.Vector3());
-        const correct = Math.hypot(position.x - training.targetPosition.x, position.z - training.targetPosition.z) <= training.tolerance;
+        const correct = Math.hypot(
+          position.x - training.targetPosition.x,
+          training.placementOrientation === 'vertical' ? position.y - training.targetPosition.y : position.z - training.targetPosition.z,
+        ) <= training.tolerance;
         if (correct) {
           training.locked = true; // Synchronous protection before invoking React's callback.
           new THREE.Matrix4().copy(training.group.matrixWorld).invert().multiply(training.targetMatrix)

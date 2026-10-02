@@ -22,13 +22,14 @@ const IDENTIFY_TASKS: readonly IdentifyTask[] = [
 
 type InstallationTask = ProductInstallationTask & {
   id: string;
-  instructionKey: 'game_install_sink' | 'game_install_cooktop';
+  instructionKey: 'game_install_sink' | 'game_install_cooktop' | 'game_install_range_hood';
   points: number;
 };
 
 const INSTALLATION_TASKS: readonly InstallationTask[] = [
   { id: 'install-sink', productId: 'sink', instructionKey: 'game_install_sink', points: 100, placementOrientation: 'horizontal' },
   { id: 'install-cooktop', productId: 'cooktop', instructionKey: 'game_install_cooktop', points: 100, placementOrientation: 'horizontal' },
+  { id: 'install-range-hood', productId: 'rangeHood', instructionKey: 'game_install_range_hood', points: 100, placementOrientation: 'vertical' },
 ];
 
 // Code Splitting with React.lazy for Google Lighthouse performance & Core Web Vitals optimization
