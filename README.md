@@ -1,65 +1,70 @@
 # Panasonic S-Class Kitchen Game Mode
 
-Stable Game Mode V0.2 shares the existing React/Three.js kitchen with Explore Mode.
+Accepted source baseline: V0.9 Priority 1 Visual Pass, with the published V1.0 release audit at `42c2c8d` on `codex/game-mode-development`. V1.0.1 adds release fixes for review; it is not a public-release approval.
 
-Start Game Mode → Find the Sink → Next Task → Find the Cooktop → Next Task → Find the Range Hood → Training Complete.
+The existing shared React/Three.js kitchen supports Explore Mode and four training phases:
 
-Each correct answer awards 100 once. Completion shows Score 300 and Products Identified 3 / 3. Wrong answers preserve the task and score; replay resets to Task 1 and Score 0. Training requires a configuration containing all three products.
+| Phase | Cumulative maximum |
+| --- | ---: |
+| Product identification | 300 |
+| Product installation | 600 |
+| Product knowledge | 900 |
+| Customer scenarios | 1200 |
 
-The application supports Japanese, English, and Myanmar. The seven-step configurator, camera controls, Focus Mode, and isolation/exploded settings are preserved.
+Each phase has three tasks. Correct answers score once; progression is explicit. Installation dragging and accessible movement controls use the same placement tolerances and world-transform snapping. Explore settings are restored after training. Japanese, English and Myanmar are supported.
 
-## Install and run
+## Runtime and dependencies
 
-Use Node.js 20.19+ or 22.12+ and pnpm 10. The committed pnpm lockfile records the dependency versions used for validation. `pnpm-workspace.yaml` retains the tested policy that disables dependency install scripts.
+Use **Node.js 24 LTS** (`>=24.19.0 <25`; `.nvmrc` records the tested 24.19.0 patch) and **pnpm 11.25.0**, pinned by `packageManager`. Keep a supported, patched Node 24 runtime; later patches require validation. The [Node release table](https://nodejs.org/en/about/previous-releases) lists the supported LTS lines.
+
+Direct package versions match the working dependency inventory. `pnpm-lock.yaml` records the resolved graph and integrity hashes; Vite has one entry in devDependencies. `pnpm-workspace.yaml` enforces the runtime engines and disables dependency lifecycle scripts. See [pnpm installation](https://pnpm.io/cli/install) and [workspace settings](https://pnpm.io/settings).
+
+Install the pinned pnpm version through your normal trusted package-manager setup. Verify versions first:
 
 ```sh
+node --version
+pnpm --version
 pnpm install --frozen-lockfile
 pnpm run dev
 ```
 
-The development server uses port 3000. The current identification game does not require an API key. `.env.example` contains placeholders only.
+The development server uses port 3000. Do not regenerate the lockfile merely to get past a frozen-install error; review a manifest/lockfile mismatch first.
 
-## Validate and build
+No API key is needed for the current training or concept configurator. `.env.example` remains trackable. `.env` and its other variants are ignored by shared rules. Do not put credentials into browser code or Vite-exposed variables; a browser bundle cannot keep a secret.
+
+## Validate the production build
 
 ```sh
 pnpm run lint
 pnpm run build
 git diff --check
+pnpm audit
+pnpm run preview
 ```
 
-`pnpm run lint` runs TypeScript checking. The production build is written to the ignored `dist/` directory. The existing Three.js chunk-size warning is documented in the V0.2 report.
+`lint` runs TypeScript checking. `dist/` is ignored. Test the generated production assets and complete training journey before release. The existing large Three.js chunk warning remains; bundle optimization is outside this pass.
 
-### Windows sandbox build workaround
+### Windows Codex sandbox diagnostics
 
-If the native Vite config loader fails with the documented directory-access error, use the same module-runner/preload approach used during V0.1 and V0.2 validation. Run this from the project root in PowerShell:
+This environment denies some native directory realpath calls and dependency symlinks. A default clean/frozen install or build can fail with `EPERM`. The validation record distinguishes those failures from successful diagnostic runs using an **external** filesystem/Vite preload and a fresh pnpm hoisted installation. That preload is not an application dependency and is not shipped in `dist/`.
 
-```powershell
-$preloadPath = Join-Path ([IO.Path]::GetTempPath()) 'sclass-vite-runner-preload.cjs'
-Set-Content -LiteralPath $preloadPath -Value 'global.__dirname = process.cwd();' -Encoding utf8
-$previousNodeOptions = $env:NODE_OPTIONS
-try {
-  $env:NODE_OPTIONS = ($previousNodeOptions + ' --require "' + $preloadPath + '"').Trim()
-  pnpm run build --configLoader runner
-} finally {
-  $env:NODE_OPTIONS = $previousNodeOptions
-}
-```
+For pnpm 11 diagnostic script runs against the pre-existing working dependencies, validation sets `pnpm_config_verify_deps_before_run=false` to prevent an implicit reinstall. This is a diagnostic environment override, not the normal release installation policy. The full commands, isolated-install paths and limitations are recorded in [V1.0.1 release fixes](outputs/Game-Mode-V1.0.1-Release-Fixes.md).
 
-The preload is outside the checkout; no Vite configuration change is required. The same preload can be used with `pnpm run preview --host 127.0.0.1 --port 3000 --configLoader runner`.
+Run the normal frozen install/build on an unrestricted clean workstation or CI before publication. A build using a diagnostic preload does not establish that an independent clean production build passed.
 
-## Source and reports
+## Content and release gates
 
-- [V0.1 implementation report](outputs/Game-Mode-V0.1.md)
-- [V0.2 implementation report](outputs/Game-Mode-V0.2.md)
-- [Original planning handoff](CODEX_HANDOFF.md)
+Models and dimensions are training concepts, not manufacturing/installation specifications. The I-Type-only drawing is a concept illustration, not a construction drawing. Displayed estimates use unverified hardcoded samples and must not be used as manufacturer/supplier quotations.
 
-The current source and implementation reports take precedence over assumptions in the historical handoff. In particular, this V0.2 implements three identification tasks. Placement, snapping, quizzes, backend integration, and final model replacement remain future work.
+Review the [content approval matrix](docs/V1.0.1_CONTENT_APPROVAL_MATRIX.md) and [accepted catalog content](docs/S_CLASS_GAME_CONTENT.md). Public release also requires physical-device, assistive-technology, customer content/pricing/brand approval and hosting acceptance. Pending copy does not become approved through passing technical tests.
 
-The validated source checkpoint is `1c88433` (`feat: complete S-Class Game Mode V0.2`). The subsequent repository-preparation checkpoint adds this README, the handoff, reports, pnpm lockfile, and install policy without changing application source or rewriting history.
+## Reports
 
-## Repository remotes
+- [V1.0 release readiness audit](outputs/Game-Mode-V1.0-Release-Readiness.md)
+- [V1.0.1 release fixes](outputs/Game-Mode-V1.0.1-Release-Fixes.md)
+- [V0.9 visual pass](outputs/Game-Mode-V0.9-Visual-Pass.md)
+- [V0.8 training results and polish](outputs/Game-Mode-V0.8.md)
+- [V0.7 customer scenarios](outputs/Game-Mode-V0.7.md)
+- [Historical handoff](CODEX_HANDOFF.md)
 
-- `origin`: original Explore source/reference, `https://github.com/komoemm/Panasonic-Kitchen-S--CLASS.git`
-- `game`: Game Mode repository, `https://github.com/komoemm/Panasonic-S-Class-Kitchen-Game-Mode.git`
-
-The stable Game Mode checkpoint belongs on `game/main`, with tag `game-mode-v0.2`.
+The current source and accepted reports take precedence over historical planning assumptions. The Game Mode repository is `https://github.com/komoemm/Panasonic-S-Class-Kitchen-Game-Mode.git`. This development pass does not commit, push, merge or deploy.

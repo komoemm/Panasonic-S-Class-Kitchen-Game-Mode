@@ -58,3 +58,10 @@
   }
 }
 
+
+/* Keep focus visible for legacy modal buttons as well as training controls. */
+button:focus-visible, textarea:focus-visible { outline: 2px solid #6ee7b7; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin, .animate-ping, .animate-pulse { animation: none !important; }
+  main section, main aside { transition-duration: 0s !important; }
+}

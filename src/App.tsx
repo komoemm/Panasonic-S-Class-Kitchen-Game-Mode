@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef, Suspense, lazy } from 'react';
-import { AppMode, KitchenConfig, Language, ProductInstallationTask } from './types';
+import { AppMode, KitchenConfig, Language, ProductInstallationTask, InstallationControls, GraphicsStatus } from './types';
 import { calculateKitchenPrice } from './utils/pricing';
 import { TopBar } from './components/TopBar';
 import { StepWizard } from './components/StepWizard';
@@ -11,6 +11,7 @@ import { LAYOUT_SCENARIOS } from './data/sClassLayoutScenarios';
 import { CustomerScenarioCard } from './components/CustomerScenarioCard';
 import { TrainingJourney, TrainingPhase } from './components/TrainingJourney';
 import { TrainingResults, TrainingCategory } from './components/TrainingResults';
+import { AccessibleIdentification, AccessibleInstallation } from './components/AccessibleTrainingControls';
 import { createTrainingAudio } from './utils/trainingAudio';
 
 type IdentifyProductId = 'sink' | 'cooktop' | 'rangeHood';
@@ -78,6 +79,19 @@ export default function App() {
   const audioRef = useRef<ReturnType<typeof createTrainingAudio> | null>(null);
   if (!audioRef.current) audioRef.current = createTrainingAudio();
   useEffect(() => () => audioRef.current?.dispose(), []);
+  const [graphicsReady, setGraphicsReady] = useState(false);
+  const graphicsReadyRef = useRef(false);
+  const [installationControls, setInstallationControls] = useState<InstallationControls | null>(null);
+  const activeIdentifyIdRef = useRef<string | null>(null);
+  const activeInstallationIdRef = useRef<string | null>(null);
+  const gameSessionRef = useRef(0);
+  const trainingFocusRequestedRef = useRef(false);
+  const gameSession = gameSessionRef.current;
+  const handleGraphicsStatus = useCallback((status: GraphicsStatus) => {
+    graphicsReadyRef.current = status === 'ready';
+    setGraphicsReady(graphicsReadyRef.current);
+  }, []);
+  useEffect(() => { document.documentElement.lang = lang === 'mm' ? 'my' : lang; }, [lang]);
   const handleToggleSound = () => {
     const enabled = !soundEnabled;
     audioRef.current?.setEnabled(enabled);
@@ -85,6 +99,8 @@ export default function App() {
   };
 
   useEffect(() => {
+    activeIdentifyIdRef.current = appMode === 'game' && gamePhase === 'identification' && gameStatus === 'playing' ? currentTask.id : null;
+    activeInstallationIdRef.current = appMode === 'game' && gamePhase === 'installation' && gameStatus === 'playing' ? currentInstallationTask.id : null;
     activeKnowledgeQuestionIdRef.current = appMode === 'game' && gamePhase === 'knowledge' && gameStatus === 'playing'
       ? currentKnowledgeQuestion.id : null;
     activeScenarioIdRef.current = appMode === 'game' && gamePhase === 'scenario' && gameStatus === 'playing'
@@ -111,11 +127,12 @@ export default function App() {
   const priceCalc = calculateKitchenPrice(config, lang);
   const t = TRANSLATIONS[lang];
   const showSidebar = appMode === 'explore' && isSidebarOpen;
-  const canStartGame = availableProductIds !== null &&
+  const canStartGame = graphicsReady && availableProductIds !== null &&
     IDENTIFY_TASKS.every((task) => availableProductIds.includes(task.productId));
 
   const handleStartGame = () => {
-    if (!canStartGame) return;
+    if (!canStartGame || !graphicsReadyRef.current || appMode !== 'explore' || gameSession !== gameSessionRef.current) return;
+    gameSessionRef.current += 1;
     taskPhaseRef.current = 'inactive';
     setReviewTraining(false);
     setCurrentTaskIndex(0);
@@ -133,6 +150,10 @@ export default function App() {
   };
 
   const handleReturnToExplore = () => {
+    if (appMode !== 'game' || gameSession !== gameSessionRef.current) return;
+    gameSessionRef.current += 1;
+    activeIdentifyIdRef.current = null;
+    activeInstallationIdRef.current = null;
     taskPhaseRef.current = 'inactive';
     activeScenarioIdRef.current = null;
     scenarioSessionRef.current += 1;
@@ -187,13 +208,15 @@ export default function App() {
 
   const handleProductSelect = useCallback((productId: string) => {
     if (appMode !== 'game' || gamePhase !== 'identification' ||
-      gameStatus !== 'playing' || taskPhaseRef.current !== 'ready') return;
+      gameStatus !== 'playing' || taskPhaseRef.current !== 'ready' || !graphicsReadyRef.current ||
+      gameSession !== gameSessionRef.current || currentTask.id !== activeIdentifyIdRef.current) return;
     if (productId !== currentTask.productId) {
       audioRef.current?.play('wrong');
       setFeedback('wrong');
       return;
     }
     taskPhaseRef.current = 'answered';
+    trainingFocusRequestedRef.current = !!document.activeElement?.closest('[data-training-controls]');
     audioRef.current?.play('correct');
     setScore((previous) => previous + currentTask.points);
     setFeedback('correct');
@@ -201,11 +224,11 @@ export default function App() {
       setGameStatus('identification-complete');
       audioRef.current?.play('complete');
     }
-  }, [appMode, gamePhase, gameStatus, currentTask, currentTaskIndex]);
+  }, [appMode, gamePhase, gameStatus, currentTask, currentTaskIndex, graphicsReady, gameSession]);
 
   const handleNextTask = () => {
     if (appMode !== 'game' || gamePhase !== 'identification' || gameStatus !== 'playing' ||
-      taskPhaseRef.current !== 'answered' || currentTaskIndex >= IDENTIFY_TASKS.length - 1) return;
+      taskPhaseRef.current !== 'answered' || gameSession !== gameSessionRef.current || currentTask.id !== activeIdentifyIdRef.current || currentTaskIndex >= IDENTIFY_TASKS.length - 1) return;
     taskPhaseRef.current = 'advancing';
     setFeedback(null);
     setCurrentTaskIndex((previous) => previous + 1);
@@ -213,7 +236,7 @@ export default function App() {
 
   const handleStartInstallation = () => {
     if (appMode !== 'game' || gameStatus !== 'identification-complete' ||
-      taskPhaseRef.current !== 'inactive') return;
+      taskPhaseRef.current !== 'inactive' || gameSession !== gameSessionRef.current) return;
     taskPhaseRef.current = 'advancing';
     setFeedback(null);
     setCurrentInstallationTaskIndex(0);
@@ -224,13 +247,15 @@ export default function App() {
   const handleInstallationDrop = useCallback((productId: ProductInstallationTask['productId'], correct: boolean) => {
     if (appMode !== 'game' || gamePhase !== 'installation' ||
       gameStatus !== 'playing' || taskPhaseRef.current !== 'ready' ||
-      productId !== currentInstallationTask.productId) return;
+      productId !== currentInstallationTask.productId || !graphicsReadyRef.current || gameSession !== gameSessionRef.current ||
+      currentInstallationTask.id !== activeInstallationIdRef.current) return;
     if (!correct) {
       audioRef.current?.play('wrong');
       setFeedback('wrong');
       return;
     }
     taskPhaseRef.current = 'answered';
+    trainingFocusRequestedRef.current = !!document.activeElement?.closest('[data-training-controls]');
     audioRef.current?.play('correct');
     setFeedback('correct');
     setScore((previous) => previous + currentInstallationTask.points);
@@ -238,11 +263,11 @@ export default function App() {
       setGameStatus('installation-complete');
       audioRef.current?.play('complete');
     }
-  }, [appMode, gamePhase, gameStatus, currentInstallationTask, currentInstallationTaskIndex]);
+  }, [appMode, gamePhase, gameStatus, currentInstallationTask, currentInstallationTaskIndex, graphicsReady, gameSession]);
 
   const handleNextInstallation = () => {
     if (appMode !== 'game' || gamePhase !== 'installation' || gameStatus !== 'playing' ||
-      taskPhaseRef.current !== 'answered' || currentInstallationTaskIndex >= INSTALLATION_TASKS.length - 1) return;
+      taskPhaseRef.current !== 'answered' || gameSession !== gameSessionRef.current || currentInstallationTask.id !== activeInstallationIdRef.current || currentInstallationTaskIndex >= INSTALLATION_TASKS.length - 1) return;
     taskPhaseRef.current = 'advancing';
     setFeedback(null);
     setCurrentInstallationTaskIndex((previous) => previous + 1);
@@ -250,7 +275,7 @@ export default function App() {
 
   const handleStartKnowledge = () => {
     if (appMode !== 'game' || gamePhase !== 'installation' || gameStatus !== 'installation-complete' ||
-      taskPhaseRef.current !== 'inactive') return;
+      taskPhaseRef.current !== 'inactive' || gameSession !== gameSessionRef.current) return;
     taskPhaseRef.current = 'advancing';
     setCurrentKnowledgeIndex(0);
     setFeedback(null);
@@ -260,7 +285,7 @@ export default function App() {
 
   const handleKnowledgeAnswer = (questionId: string, answerId: string) => {
     if (appMode !== 'game' || gamePhase !== 'knowledge' || gameStatus !== 'playing' ||
-      taskPhaseRef.current !== 'ready' || questionId !== activeKnowledgeQuestionIdRef.current ||
+      taskPhaseRef.current !== 'ready' || gameSession !== gameSessionRef.current || questionId !== activeKnowledgeQuestionIdRef.current ||
       currentKnowledgeQuestion.id !== activeKnowledgeQuestionIdRef.current) return;
     const answer = currentKnowledgeQuestion.answers.find((choice) => choice.id === answerId);
     if (!answer) return;
@@ -281,7 +306,7 @@ export default function App() {
 
   const handleNextKnowledge = () => {
     if (appMode !== 'game' || gamePhase !== 'knowledge' || gameStatus !== 'playing' ||
-      taskPhaseRef.current !== 'answered' || currentKnowledgeQuestion.id !== activeKnowledgeQuestionIdRef.current ||
+      taskPhaseRef.current !== 'answered' || gameSession !== gameSessionRef.current || currentKnowledgeQuestion.id !== activeKnowledgeQuestionIdRef.current ||
       currentKnowledgeIndex >= KNOWLEDGE_QUESTIONS.length - 1) return;
     taskPhaseRef.current = 'advancing';
     activeKnowledgeQuestionIdRef.current = null;
@@ -291,7 +316,7 @@ export default function App() {
 
   const handleStartScenarios = () => {
     if (appMode !== 'game' || gamePhase !== 'knowledge' || gameStatus !== 'knowledge-complete' ||
-      taskPhaseRef.current !== 'inactive') return;
+      taskPhaseRef.current !== 'inactive' || gameSession !== gameSessionRef.current) return;
     taskPhaseRef.current = 'advancing';
     scenarioSessionRef.current += 1;
     // Snapshot the whole existing configuration, including the nested upgrades record.
@@ -360,6 +385,17 @@ export default function App() {
   const taskPoints = gamePhase === 'scenario' ? currentScenario.points : gamePhase === 'knowledge' ? currentKnowledgeQuestion.points :
     gamePhase === 'installation' ? currentInstallationTask.points : currentTask.points;
 
+  // Move keyboard focus to the next available action only when using training controls.
+  useEffect(() => {
+    const active = document.activeElement as HTMLElement | null;
+    if (appMode !== 'game' || (!trainingFocusRequestedRef.current && !active?.closest('#next-task-btn, #next-installation-btn, #start-installation-btn, #start-game-btn'))) return;
+    trainingFocusRequestedRef.current = false;
+    const next = feedback === 'correct'
+      ? document.querySelector<HTMLElement>('#next-task-btn:not(:disabled), #next-installation-btn:not(:disabled), #start-installation-btn, #start-knowledge-btn')
+      : document.querySelector<HTMLElement>('[data-training-controls] button:not(:disabled)');
+    next?.focus({ preventScroll: true });
+  }, [appMode, gamePhase, gameStatus, currentTaskIndex, currentInstallationTaskIndex, feedback]);
+
   // Sequential phase totals come from the existing task data and single score state.
   const productNames = [t.game_sink, t.game_cooktop, t.game_range_hood];
   const resultGroups = [
@@ -412,12 +448,12 @@ export default function App() {
                       : `${currentTaskIndex + 1} / ${IDENTIFY_TASKS.length}`}
                   </p>
                 )}
-                <h2 className="mt-1 text-lg font-bold" id="game-task">
+                <h2 className="mt-1 text-lg font-bold" id="game-task" aria-live="polite" aria-atomic="true">
                   {instruction}
                 </h2>
               </>
             )}
-            {appMode === 'explore' && availableProductIds !== null && !canStartGame && (
+            {appMode === 'explore' && graphicsReady && availableProductIds !== null && !canStartGame && (
               <p id="game-unavailable" className="mt-1 text-sm text-slate-400">{t.game_requires_products}</p>
             )}
           </div>
@@ -446,14 +482,14 @@ export default function App() {
                 <span aria-hidden="true" className="invisible col-start-1 row-start-1">{trainingHint}</span>
               </p>
               {gameStatus === 'playing' && gamePhase === 'identification' && (
-                <button type="button" id="next-task-btn" onClick={handleNextTask}
+                <button type="button" id="next-task-btn" {...trainingButtonEvents(handleNextTask)}
                   disabled={feedback !== 'correct'} aria-hidden={feedback !== 'correct'}
                   className={`min-h-[3rem] rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ${feedback !== 'correct' ? 'invisible' : ''}`}>
                   {t.game_next_task}
                 </button>
               )}
               {gameStatus === 'identification-complete' && (
-                <button type="button" id="start-installation-btn" onClick={handleStartInstallation}
+                <button type="button" id="start-installation-btn" {...trainingButtonEvents(handleStartInstallation)}
                   className="min-h-[3rem] rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
                   {t.game_start_installation}
                 </button>
@@ -482,15 +518,24 @@ export default function App() {
           <button type="button" id={appMode === 'explore' ? 'start-game-btn' : 'return-explore-btn'}
             {...trainingButtonEvents(appMode === 'explore' ? handleStartGame : handleReturnToExplore)}
             disabled={appMode === 'explore' && !canStartGame}
-            aria-describedby={appMode === 'explore' && availableProductIds !== null && !canStartGame ? 'game-unavailable' : undefined}
+            aria-describedby={appMode === 'explore' && availableProductIds !== null && !canStartGame ? graphicsReady ? 'game-unavailable' : 'graphics-fallback' : undefined}
             className="min-h-[3rem] rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
             {appMode === 'explore' ? t.game_start : t.game_return}
           </button>
         </div>
       </section>
 
+      <p className="max-w-[1720px] w-full mx-auto px-4 pt-2 text-xs text-slate-400">{t.concept_notice}</p>
+
       {/* Main Responsive Layout */}
       <main className="flex-1 max-w-[1720px] w-full mx-auto p-3 sm:p-5 lg:p-6 flex flex-col lg:flex-row gap-4 lg:gap-6 relative overflow-x-hidden">
+        {appMode === 'game' && gameStatus === 'playing' && gamePhase === 'identification' && (
+          <AccessibleIdentification lang={lang} disabled={!graphicsReady || feedback === 'correct'} onSelect={handleProductSelect} buttonEvents={trainingButtonEvents} />
+        )}
+        {appMode === 'game' && gameStatus === 'playing' && gamePhase === 'installation' && (
+          <AccessibleInstallation lang={lang} task={currentInstallationTask}
+            controls={installationControls} disabled={!graphicsReady || feedback === 'correct'} buttonEvents={trainingButtonEvents} />
+        )}
         {appMode === 'game' && gameStatus === 'complete' && (
           <TrainingResults lang={lang} score={score} categories={resultCategories} review={reviewTraining}
             onToggleReview={() => setReviewTraining(!reviewTraining)} onReturn={handleReturnToExplore} buttonEvents={trainingButtonEvents} />
@@ -508,7 +553,7 @@ export default function App() {
             onNext={() => handleNextCustomer(currentScenario.id)} buttonEvents={trainingButtonEvents} />
         ) : null}
         {/* Left / Center 3D Interactive Viewport with Suspense Skeleton */}
-        <section 
+        <section
           aria-label={lang === 'ja' ? '3Dモデル表示領域' : '3D Model Viewport Area'}
           className="flex-1 min-w-0 flex flex-col h-[480px] sm:h-[560px] lg:h-[calc(100vh-100px)] min-h-[440px] transition-all duration-300 ease-in-out relative"
         >
@@ -519,6 +564,8 @@ export default function App() {
               mode={appMode}
               installationTask={installationTask}
               onInstallationDrop={handleInstallationDrop}
+              onInstallationControlsChange={setInstallationControls}
+              onGraphicsStatusChange={handleGraphicsStatus}
               onProductSelect={handleProductSelect}
               onAvailableProductsChange={setAvailableProductIds}
               activeFocus={appMode === 'explore' && currentStep === 6 ? 'sink' : undefined}
@@ -532,13 +579,13 @@ export default function App() {
         </section>
 
         {/* Right 7-Step Configurator Wizard Panel (Collapsible Container with smooth transition) */}
-        <aside 
+        <aside
           aria-label={lang === 'ja' ? '7ステップ見積シミュレーター設定' : '7-Step Kitchen Configuration Wizard'}
           aria-hidden={!showSidebar}
           inert={!showSidebar}
           className={`${appMode === 'game' ? 'hidden' : 'flex'} flex-col h-[520px] sm:h-[600px] lg:h-[calc(100vh-100px)] min-h-[500px] transition-all duration-300 ease-in-out ${
             showSidebar
-              ? 'w-full lg:w-[420px] xl:w-[460px] opacity-100' 
+              ? 'w-full lg:w-[420px] xl:w-[460px] opacity-100'
               : 'w-0 opacity-0 pointer-events-none p-0 overflow-hidden m-0 border-0'
           }`}
         >
@@ -565,7 +612,7 @@ export default function App() {
             <div className="flex items-center gap-3 px-6 py-3.5 rounded-2xl bg-slate-900 border border-slate-700 text-slate-200 text-sm shadow-2xl">
               <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
               <span className="font-medium">
-                {lang === 'ja' ? '見積書データを読み込み中...' : 'Loading quotation...'}
+                {t.quote_loading}
               </span>
             </div>
           </div>
@@ -587,7 +634,7 @@ export default function App() {
             <div className="flex items-center gap-3 px-6 py-3.5 rounded-2xl bg-slate-900 border border-slate-700 text-slate-200 text-sm shadow-2xl">
               <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
               <span className="font-medium">
-                {lang === 'ja' ? '2D図面データを読み込み中...' : 'Loading architectural blueprint...'}
+                {t.blueprint_loading}
               </span>
             </div>
           </div>

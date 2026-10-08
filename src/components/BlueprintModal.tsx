@@ -1,7 +1,8 @@
+import { useModalFocus } from '../utils/useModalFocus';
 import React from 'react';
 import { KitchenConfig, Language } from '../types';
 import { TRANSLATIONS } from '../i18n/translations';
-import { X, Layers, Compass, Ruler } from 'lucide-react';
+import { X, Layers } from 'lucide-react';
 
 interface BlueprintModalProps {
   isOpen: boolean;
@@ -18,31 +19,28 @@ export const BlueprintModal: React.FC<BlueprintModalProps> = ({
 }) => {
   const t = TRANSLATIONS[lang] || TRANSLATIONS.ja;
 
+  const dialogRef = useModalFocus(isOpen, onClose);
   if (!isOpen) return null;
 
   const isLeft = config.sinkLocation === 'left';
-  // SVG coordinates:
-  // Kitchen counter: W=600px (representing 2550mm), H=150px (representing 650mm)
-  // Sink box: W=160px, H=110px. If Left: X=50px, if Right: X=390px.
-  // Cooktop box: W=180px, H=90px. If Left: X=370px, if Right: X=50px.
-  // Dishwasher: Center X=230px, W=140px.
-
+  // Existing schematic coordinates; no scale or installation dimensions are implied.
   const sinkX = isLeft ? 50 : 390;
   const cooktopX = isLeft ? 370 : 50;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto">
-      <div className="relative w-full max-w-4xl glass-panel-elevated rounded-2xl shadow-2xl border border-emerald-500/30 overflow-hidden my-auto">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="blueprint-modal-title" tabIndex={-1} className="relative w-full max-w-4xl glass-panel-elevated rounded-2xl shadow-2xl border border-emerald-500/30 overflow-hidden my-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-4 bg-slate-900/95 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <Layers className="w-5 h-5 text-emerald-400" />
-            <h3 className="font-bold text-base text-white">
+            <h3 id="blueprint-modal-title" className="font-bold text-base text-white">
               {t.blueprint_title}
             </h3>
           </div>
           <button
             onClick={onClose}
+            aria-label={t.dialog_close}
             className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -51,48 +49,17 @@ export const BlueprintModal: React.FC<BlueprintModalProps> = ({
 
         {/* Blueprint Content */}
         <div className="p-6 sm:p-8 space-y-6 bg-[#0c121e]">
-          {/* Dimension Badges */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-2">
-              <Ruler className="w-4 h-4 text-emerald-400" />
-              <div>
-                <div className="text-[10px] text-slate-500 uppercase">間口 (Width)</div>
-                <div className="font-bold text-slate-100">2,550 mm</div>
-              </div>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-2">
-              <Ruler className="w-4 h-4 text-cyan-400" />
-              <div>
-                <div className="text-[10px] text-slate-500 uppercase">奥行 (Depth)</div>
-                <div className="font-bold text-slate-100">650 mm</div>
-              </div>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-2">
-              <Ruler className="w-4 h-4 text-amber-400" />
-              <div>
-                <div className="text-[10px] text-slate-500 uppercase">天面高 (Height)</div>
-                <div className="font-bold text-slate-100">850 mm</div>
-              </div>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-2">
-              <Compass className="w-4 h-4 text-purple-400" />
-              <div>
-                <div className="text-[10px] text-slate-500 uppercase">シンク配置 (Hand)</div>
-                <div className="font-bold text-emerald-400">
-                  {isLeft ? 'シンク左 (L)' : 'シンク右 (R)'}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Architectural SVG Plan Blueprint */}
+          <p className="text-sm text-slate-300">{t.blueprint_scope}</p>
+          {config.layout !== 'type-i' ? <p id="blueprint-unavailable" role="status" className="rounded-xl border border-slate-700 p-4 text-slate-200">{t.blueprint_unavailable}</p> : <>
+          {/* Existing I-Type concept schematic */}
           <div className="relative p-4 sm:p-6 rounded-2xl bg-slate-950 border border-cyan-500/20 shadow-inner flex flex-col items-center">
             <div className="text-xs font-mono text-cyan-400/80 mb-2 w-full flex justify-between">
-              <span>PLAN VIEW (平面図 - 1:20)</span>
-              <span>PANASONIC S-CLASS KITCHEN MODULE</span>
+              <span>{t.blueprint_plan}</span>
+              <span>{t.layout_type_i_name}</span>
             </div>
 
             <svg
+              role="img" aria-label={t.blueprint_title}
               viewBox="0 0 700 280"
               className="w-full max-w-2xl h-auto stroke-cyan-400/70"
             >
@@ -126,30 +93,6 @@ export const BlueprintModal: React.FC<BlueprintModalProps> = ({
                 strokeWidth="2.5"
                 rx="4"
               />
-
-              {/* Dimension Callout Top (2550mm) */}
-              <line x1="50" y1="28" x2="650" y2="28" stroke="#00f2fe" strokeWidth="1.5" />
-              <line x1="50" y1="22" x2="50" y2="34" stroke="#00f2fe" strokeWidth="1.5" />
-              <line x1="650" y1="22" x2="650" y2="34" stroke="#00f2fe" strokeWidth="1.5" />
-              <text x="350" y="24" fill="#00f2fe" fontSize="11" textAnchor="middle" fontFamily="monospace">
-                2,550 mm
-              </text>
-
-              {/* Dimension Callout Left (650mm) */}
-              <line x1="28" y1="50" x2="28" y2="200" stroke="#00f2fe" strokeWidth="1.5" />
-              <line x1="22" y1="50" x2="34" y2="50" stroke="#00f2fe" strokeWidth="1.5" />
-              <line x1="22" y1="200" x2="34" y2="200" stroke="#00f2fe" strokeWidth="1.5" />
-              <text
-                x="22"
-                y="125"
-                fill="#00f2fe"
-                fontSize="11"
-                textAnchor="middle"
-                fontFamily="monospace"
-                transform="rotate(-90 22 125)"
-              >
-                650 mm
-              </text>
 
               {/* Sink Unit */}
               <rect
@@ -187,7 +130,7 @@ export const BlueprintModal: React.FC<BlueprintModalProps> = ({
                 fontFamily="sans-serif"
                 fontWeight="bold"
               >
-                {config.upgrades.sugoPikaSink ? 'スゴピカシンク' : '標準シンク'}
+                {t.game_sink}
               </text>
 
               {/* Center Work Prep Zone or Dishwasher indicator */}
@@ -209,18 +152,9 @@ export const BlueprintModal: React.FC<BlueprintModalProps> = ({
                 textAnchor="middle"
                 fontFamily="sans-serif"
               >
-                調理スペース
+                {t.blueprint_prep}
               </text>
-              <text
-                x="290"
-                y="138"
-                fill="#64748b"
-                fontSize="9"
-                textAnchor="middle"
-                fontFamily="sans-serif"
-              >
-                {config.floorUnit === 'front-dishwasher' ? '(食洗機内蔵)' : '(大容量スライド)'}
-              </text>
+
 
               {/* IH Cooktop Unit */}
               <rect
@@ -247,7 +181,7 @@ export const BlueprintModal: React.FC<BlueprintModalProps> = ({
                     textAnchor="middle"
                     fontWeight="bold"
                   >
-                    トリプルワイド IH (横3口並び)
+                    {t.game_cooktop}
                   </text>
                 </>
               ) : (
@@ -261,7 +195,7 @@ export const BlueprintModal: React.FC<BlueprintModalProps> = ({
                     fontSize="9"
                     textAnchor="middle"
                   >
-                    標準IHクッキングヒーター
+                    {t.blueprint_standard_cooktop}
                   </text>
                 </>
               )}
@@ -276,12 +210,11 @@ export const BlueprintModal: React.FC<BlueprintModalProps> = ({
                 fontFamily="sans-serif"
                 fontWeight="bold"
               >
-                {isLeft
-                  ? '← シンク左配置 (Left Sink: -0.75m) | コンロ右配置 (+0.75m) →'
-                  : '← コンロ左配置 (-0.75m) | シンク右配置 (Right Sink: +0.75m) →'}
+                {isLeft ? t.blueprint_sink_left : t.blueprint_sink_right}
               </text>
             </svg>
           </div>
+          </>}
         </div>
 
         {/* Footer */}

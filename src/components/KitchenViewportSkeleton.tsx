@@ -1,3 +1,4 @@
+import { TRANSLATIONS } from '../i18n/translations';
 import React from 'react';
 import { Box, Loader2 } from 'lucide-react';
 import { Language } from '../types';
@@ -7,25 +8,23 @@ interface KitchenViewportSkeletonProps {
 }
 
 export const KitchenViewportSkeleton: React.FC<KitchenViewportSkeletonProps> = ({ lang = 'ja' }) => {
-  const loadingLabel = lang === 'ja' 
-    ? 'Panasonic 3Dショールームを展開中...' 
-    : lang === 'mm' 
-    ? 'Panasonic 3D ရှိုးခန်းကို ဖွင့်လှစ်နေပါသည်...' 
+  const loadingLabel = lang === 'ja'
+    ? 'Panasonic 3Dショールームを展開中...'
+    : lang === 'mm'
+    ? 'Panasonic 3D ရှိုးခန်းကို ဖွင့်လှစ်နေပါသည်...'
     : 'Initializing Panasonic 3D Showroom...';
 
-  const specsLabel = lang === 'ja'
-    ? '2550mm × 650mm × 850mm | システムキッチン'
-    : '2550mm × 650mm × 850mm | S-CLASS System Kitchen';
+  const specsLabel = TRANSLATIONS[lang].graphics_starting;
 
   return (
-    <div 
-      id="viewport-skeleton" 
+    <div
+      id="viewport-skeleton"
       className="relative w-full h-full min-h-[420px] lg:min-h-[520px] flex flex-col rounded-2xl overflow-hidden glass-panel border border-slate-700/60 shadow-2xl bg-[#0b0f19] select-none"
       aria-busy="true"
       aria-label="3D Viewport Loading Skeleton"
     >
       {/* Background Architectural Grid Pattern */}
-      <div 
+      <div
         className="absolute inset-0 opacity-20 pointer-events-none"
         style={{
           backgroundImage: `

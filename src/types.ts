@@ -1,12 +1,21 @@
 export type Language = 'ja' | 'en' | 'mm';
 
 export type AppMode = 'explore' | 'game';
+export type GraphicsStatus = 'starting' | 'ready' | 'unavailable' | 'lost';
 
 export type PlacementOrientation = 'horizontal' | 'vertical';
 
 export type ProductInstallationTask = {
   productId: 'sink' | 'cooktop' | 'rangeHood';
   placementOrientation: PlacementOrientation;
+};
+
+// Accessible controls operate the live installation session, never a separate score path.
+export type InstallationControls = {
+  move: (x: number, planeAxis: number) => void;
+  confirm: () => void;
+  reset: () => void;
+  getOffset: () => { x: number; planeAxis: number; tolerance: number };
 };
 
 export type PlanLayoutId = 'type-i' | 'type-l' | 'face-to-face' | 'type-ii' | 'island';

@@ -1,18 +1,18 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { AppMode, KitchenConfig, CameraPresetId, Language, ProductInstallationTask } from '../types';
+import { AppMode, KitchenConfig, CameraPresetId, Language, ProductInstallationTask, InstallationControls, GraphicsStatus } from '../types';
 import { CABINET_FINISHES } from '../data/configOptions';
 import { TRANSLATIONS } from '../i18n/translations';
-import { 
-  Maximize2, 
+import {
+  Maximize2,
   Minimize2,
-  RotateCcw, 
-  Droplets, 
-  Flame, 
-  Fan, 
-  Lightbulb, 
-  Layers, 
+  RotateCcw,
+  Droplets,
+  Flame,
+  Fan,
+  Lightbulb,
+  Layers,
   Eye,
   Camera,
   Boxes,
@@ -80,6 +80,8 @@ interface KitchenViewport3DProps {
   lang: Language;
   mode?: AppMode;
   installationTask?: ProductInstallationTask | null;
+  onInstallationControlsChange?: (controls: InstallationControls | null) => void;
+  onGraphicsStatusChange?: (status: GraphicsStatus) => void;
   onInstallationDrop?: (productId: ProductInstallationTask['productId'], correct: boolean) => void;
   onProductSelect?: (productId: string) => void;
   onAvailableProductsChange?: (productIds: string[]) => void;
@@ -97,6 +99,8 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
   mode = 'explore',
   installationTask = null,
   onInstallationDrop,
+  onInstallationControlsChange,
+  onGraphicsStatusChange,
   onProductSelect,
   onAvailableProductsChange,
   activeFocus,
@@ -106,6 +110,25 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
   onToggleSidebar,
 }) => {
   const t = TRANSLATIONS[lang] || TRANSLATIONS.ja;
+  const [graphicsStatus, setGraphicsStatus] = useState<GraphicsStatus>('starting');
+  const [graphicsRetry, setGraphicsRetry] = useState(0);
+  const graphicsReadyRef = useRef(false);
+  const reducedMotionRef = useRef(false);
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => { reducedMotionRef.current = media.matches; };
+    update(); media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  const graphicsCallbackRef = useRef(onGraphicsStatusChange);
+  const installationControlsCallbackRef = useRef(onInstallationControlsChange);
+  graphicsCallbackRef.current = onGraphicsStatusChange;
+  installationControlsCallbackRef.current = onInstallationControlsChange;
+  const reportGraphics = useCallback((status: GraphicsStatus) => {
+    graphicsReadyRef.current = status === 'ready';
+    setGraphicsStatus(status);
+    graphicsCallbackRef.current?.(status);
+  }, []);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Interactive 3D toggles
@@ -230,6 +253,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     if (!training) return;
     stopProductDrag(false);
     installationRef.current = null;
+    installationControlsCallbackRef.current?.(null);
     training.original.visible = training.originalVisible;
     training.group.removeFromParent();
     training.group.clear();
@@ -238,6 +262,25 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     training.target.material.dispose();
     markInteraction();
   }, [stopProductDrag, markInteraction]);
+
+  // One measured validation/snap path for pointer drops and accessible confirmation.
+  const confirmProductInstallation = useCallback((training: ProductInstallation) => {
+    if (installationRef.current !== training || training.locked || training.drag || !graphicsReadyRef.current ||
+      modeRef.current !== 'game' || installationTaskRef.current?.productId !== training.productId) return;
+    training.group.updateWorldMatrix(true, true);
+    const position = training.clone.getWorldPosition(new THREE.Vector3());
+    const correct = Math.hypot(position.x - training.targetPosition.x,
+      training.placementOrientation === 'vertical' ? position.y - training.targetPosition.y : position.z - training.targetPosition.z,
+    ) <= training.tolerance;
+    if (correct) {
+      training.locked = true;
+      new THREE.Matrix4().copy(training.group.matrixWorld).invert().multiply(training.targetMatrix)
+        .decompose(training.clone.position, training.clone.quaternion, training.clone.scale);
+      training.target.visible = false;
+    } else training.clone.position.copy(training.group.worldToLocal(training.stagingPosition.clone()));
+    markInteraction();
+    onInstallationDropRef.current?.(training.productId, correct);
+  }, [markInteraction]);
 
   const createProductInstallation = useCallback((task: ProductInstallationTask) => {
     const scene = sceneRef.current;
@@ -332,10 +375,33 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       tolerance: Math.min(size.x, vertical ? size.y : size.z) * 0.2,
       locked: false, drag: null,
     };
+    const training = installationRef.current;
+    const active = () => installationRef.current === training && !training.locked && !training.drag &&
+      graphicsReadyRef.current && modeRef.current === 'game' && installationTaskRef.current?.productId === training.productId;
+    installationControlsCallbackRef.current?.({
+      move: (x, axis) => {
+        if (!active() || !Number.isFinite(x) || !Number.isFinite(axis)) return;
+        const position = training.clone.getWorldPosition(new THREE.Vector3());
+        position.x += THREE.MathUtils.clamp(x, -0.1, 0.1);
+        if (vertical) { position.y += THREE.MathUtils.clamp(axis, -0.1, 0.1); position.z = training.targetPosition.z; }
+        else { position.z += THREE.MathUtils.clamp(axis, -0.1, 0.1); position.y = training.targetPosition.y; }
+        training.clone.position.copy(training.group.worldToLocal(position));
+        targetCameraPosRef.current = null; targetLookAtRef.current = null;
+        markInteraction();
+      },
+      confirm: () => confirmProductInstallation(training),
+      reset: () => { if (active()) { training.clone.position.copy(training.group.worldToLocal(training.stagingPosition.clone())); markInteraction(); } },
+      getOffset: () => {
+        const position = training.clone.getWorldPosition(new THREE.Vector3());
+        return { x: training.targetPosition.x - position.x,
+          planeAxis: vertical ? training.targetPosition.y - position.y : training.targetPosition.z - position.z,
+          tolerance: training.tolerance };
+      },
+    });
     product.visible = false;
     frameInstallation(bounds, clone, vertical);
     markInteraction();
-  }, [markInteraction, frameInstallation]);
+  }, [markInteraction, frameInstallation, confirmProductInstallation]);
 
   // Exploded factor synchronization
   useEffect(() => {
@@ -984,7 +1050,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     const isPeninsula = config.layout === 'face-to-face' || config.layout === 'island';
     const isLType = config.layout === 'type-l';
     const isTypeII = config.layout === 'type-ii';
-    
+
     // Depth: standard 0.65m, peninsula/island 0.933m
     const counterDepth = isPeninsula ? 0.933 : 0.65;
     const counterWidth = 2.55;
@@ -1098,8 +1164,8 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
         // Carcass under non-sink main prep area
         const fMainCarcass = new THREE.Mesh(new THREE.BoxGeometry(mainCarcassWidth, baseCarcassHeight, counterDepth - 0.04), carcassMat);
-        const fMainCarcassX = sinkIsLeft 
-          ? (-counterWidth / 2 + 0.01 + sinkCarcassWidth + mainCarcassWidth / 2) 
+        const fMainCarcassX = sinkIsLeft
+          ? (-counterWidth / 2 + 0.01 + sinkCarcassWidth + mainCarcassWidth / 2)
           : (-counterWidth / 2 + 0.01 + mainCarcassWidth / 2);
         fMainCarcass.position.set(fMainCarcassX, plinthHeight + baseCarcassHeight / 2, sinkIslandZ - 0.01);
         fMainCarcass.castShadow = true;
@@ -1108,8 +1174,8 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
         // Carcass under sink basin cavity
         const fSinkCarcass = new THREE.Mesh(new THREE.BoxGeometry(sinkCarcassWidth, sinkCarcassHeight, counterDepth - 0.04), carcassMat);
-        const fSinkCarcassX = sinkIsLeft 
-          ? (-counterWidth / 2 + 0.01 + sinkCarcassWidth / 2) 
+        const fSinkCarcassX = sinkIsLeft
+          ? (-counterWidth / 2 + 0.01 + sinkCarcassWidth / 2)
           : (counterWidth / 2 - 0.01 - sinkCarcassWidth / 2);
         fSinkCarcass.position.set(fSinkCarcassX, plinthHeight + sinkCarcassHeight / 2, sinkIslandZ - 0.01);
         fSinkCarcass.castShadow = true;
@@ -1388,8 +1454,8 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       // Carcass under non-sink main area (full height suspended above plinth)
       const mainCarcassGeom = new THREE.BoxGeometry(mainCarcassWidth, baseCarcassHeight, counterDepth - 0.04);
       const mainCarcass = new THREE.Mesh(mainCarcassGeom, carcassMat);
-      const mainCarcassX = sinkIsLeft 
-        ? (-counterWidth / 2 + 0.01 + sinkCarcassWidth + mainCarcassWidth / 2) 
+      const mainCarcassX = sinkIsLeft
+        ? (-counterWidth / 2 + 0.01 + sinkCarcassWidth + mainCarcassWidth / 2)
         : (-counterWidth / 2 + 0.01 + mainCarcassWidth / 2);
       mainCarcass.position.set(mainCarcassX, plinthHeight + baseCarcassHeight / 2, -0.01);
       mainCarcass.castShadow = true;
@@ -1400,8 +1466,8 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       const sinkCarcassHeight = 0.44;
       const sinkCarcassGeom = new THREE.BoxGeometry(sinkCarcassWidth, sinkCarcassHeight, counterDepth - 0.04);
       const sinkCarcass = new THREE.Mesh(sinkCarcassGeom, carcassMat);
-      const sinkCarcassX = sinkIsLeft 
-        ? (-counterWidth / 2 + 0.01 + sinkCarcassWidth / 2) 
+      const sinkCarcassX = sinkIsLeft
+        ? (-counterWidth / 2 + 0.01 + sinkCarcassWidth / 2)
         : (counterWidth / 2 - 0.01 - sinkCarcassWidth / 2);
       sinkCarcass.position.set(sinkCarcassX, plinthHeight + sinkCarcassHeight / 2, -0.01);
       sinkCarcass.castShadow = true;
@@ -1603,7 +1669,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
         for (let d = 0; d < returnDrawerCount; d++) {
           const drawerY = plinthHeight + returnDrawerGap + d * (returnDrawerHeight + returnDrawerGap) + returnDrawerHeight / 2;
-          
+
           // Drawer facade panel (extending along Z axis)
           const drawerGeom = new THREE.BoxGeometry(returnDrawerThickness, returnDrawerHeight, returnDrawerLength);
           const drawer = new THREE.Mesh(drawerGeom, cabinetMat);
@@ -2434,6 +2500,8 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     const width = container.clientWidth;
     const height = container.clientHeight || 500;
 
+    reportGraphics('starting');
+
     // Scene
     const scene = new THREE.Scene();
     sceneRef.current = scene;
@@ -2445,13 +2513,21 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     cameraRef.current = camera;
 
     // Renderer with optimized WebGL settings
-    const renderer = new THREE.WebGLRenderer({ 
-      antialias: true, 
-      alpha: true, 
-      powerPreference: 'high-performance',
-      stencil: false,
-      depth: true,
-    });
+    // Probe the same canvas/context passed to the renderer; no extra WebGL world.
+    const canvas = document.createElement('canvas');
+    let context: WebGL2RenderingContext | null = null;
+    let renderer: THREE.WebGLRenderer;
+    try {
+      context = canvas.getContext('webgl2', { antialias: true, alpha: true, powerPreference: 'high-performance', stencil: false, depth: true });
+      if (!context) throw new Error('Graphics unavailable');
+      renderer = new THREE.WebGLRenderer({ canvas, context, antialias: true, alpha: true, powerPreference: 'high-performance', stencil: false, depth: true });
+    } catch {
+      try { context?.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* Failed context cannot be recovered. */ }
+      scene.clear(); sceneRef.current = null; cameraRef.current = null;
+      onAvailableProductsChangeRef.current?.([]);
+      reportGraphics('unavailable');
+      return;
+    }
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     renderer.setClearColor(0xf4f4f6, 1);
@@ -2548,8 +2624,15 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       raycaster.setFromCamera(pointer, camera);
       return true;
     };
+    const onContextLost = (event: Event) => {
+      event.preventDefault(); clickStart = null; stopProductDrag(true); reportGraphics('lost');
+    };
+    const onContextRestored = () => { reportGraphics('ready'); markInteraction(); };
+    renderer.domElement.addEventListener('webglcontextlost', onContextLost);
+    renderer.domElement.addEventListener('webglcontextrestored', onContextRestored);
     let clickStart: { pointerId: number; x: number; y: number } | null = null;
     const onSelectionPointerDown = (event: PointerEvent) => {
+      if (!graphicsReadyRef.current) return;
       const training = installationRef.current;
       if (modeRef.current === 'game' && installationTaskRef.current) {
         clickStart = null;
@@ -2595,27 +2678,12 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       if (training?.drag?.pointerId === event.pointerId) {
         onSelectionPointerMove(event); // Include the final pointer coordinates.
         stopProductDrag(false);
-        if (training.locked || modeRef.current !== 'game' || !installationTaskRef.current) return;
-        const position = training.clone.getWorldPosition(new THREE.Vector3());
-        const correct = Math.hypot(
-          position.x - training.targetPosition.x,
-          training.placementOrientation === 'vertical' ? position.y - training.targetPosition.y : position.z - training.targetPosition.z,
-        ) <= training.tolerance;
-        if (correct) {
-          training.locked = true; // Synchronous protection before invoking React's callback.
-          new THREE.Matrix4().copy(training.group.matrixWorld).invert().multiply(training.targetMatrix)
-            .decompose(training.clone.position, training.clone.quaternion, training.clone.scale);
-          training.target.visible = false;
-        } else {
-          training.clone.position.copy(training.group.worldToLocal(training.stagingPosition.clone()));
-        }
-        markInteraction();
-        onInstallationDropRef.current?.(training.productId, correct);
+        confirmProductInstallation(training);
         return;
       }
       const start = clickStart;
       clickStart = null;
-      if (modeRef.current !== 'game' || installationTaskRef.current || !start || event.pointerId !== start.pointerId ||
+      if (!graphicsReadyRef.current || modeRef.current !== 'game' || installationTaskRef.current || !start || event.pointerId !== start.pointerId ||
           Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) return;
       if (!setPointerRay(event)) return;
       const [hit] = raycaster.intersectObjects(selectableObjectsRef.current.filter(isObjectVisible), false);
@@ -2768,6 +2836,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
     // Initial build
     rebuildKitchenScene();
+    reportGraphics('ready');
 
     // Throttled Animation Loop: Reduces CPU/GPU by throttling idle state & background animations
     const IDLE_THROTTLE_FPS = 30;
@@ -2779,7 +2848,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       animFrameIdRef.current = requestAnimationFrame(animate);
 
       // 1. Completely pause rendering when browser tab is inactive/hidden
-      if (document.hidden) return;
+      if (document.hidden || !graphicsReadyRef.current) return;
 
       const now = timestamp || performance.now();
       const timeSinceInteraction = now - lastInteractionTimeRef.current;
@@ -2797,7 +2866,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
       // Check if background mechanical animations are running
       const isDynamicBackground =
-        fanActiveRef.current || waterActiveRef.current || burnerActiveRef.current || isDoorMoving || isExplodedTransitioning;
+        (!reducedMotionRef.current && (fanActiveRef.current || waterActiveRef.current || burnerActiveRef.current)) || isDoorMoving || isExplodedTransitioning;
 
       // 2. Idle State: Neither interacting nor animating -> Skip rendering entirely
       if (!isUserInteracting && !isCameraTransitioning && !isDynamicBackground) {
@@ -2823,7 +2892,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       currentExplodedFactorRef.current = THREE.MathUtils.lerp(
         currentExplodedFactorRef.current,
         targetExplodedFactorRef.current,
-        0.08
+        reducedMotionRef.current ? 1 : 0.08
       );
       const ef = currentExplodedFactorRef.current;
 
@@ -2846,15 +2915,15 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       }
 
       // Animate fan rotation if active
-      if (fanBladesRef.current && fanActiveRef.current) {
+      if (!reducedMotionRef.current && fanBladesRef.current && fanActiveRef.current) {
         fanBladesRef.current.rotation.y += delta * 12;
       }
 
       // Animate water flow wobble & ripple disc pulse if active
-      if (waterStreamMeshRef.current && waterActiveRef.current) {
+      if (!reducedMotionRef.current && waterStreamMeshRef.current && waterActiveRef.current) {
         waterStreamMeshRef.current.rotation.y = Math.sin(elapsedTime * 6) * 0.08;
       }
-      if (waterRippleDiscRef.current && waterActiveRef.current) {
+      if (!reducedMotionRef.current && waterRippleDiscRef.current && waterActiveRef.current) {
         const rippleScale = 1.0 + Math.sin(elapsedTime * 8) * 0.16;
         waterRippleDiscRef.current.scale.set(rippleScale, rippleScale, 1);
         if (waterRippleDiscRef.current.material instanceof THREE.Material) {
@@ -2863,7 +2932,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       }
 
       // Animate burner ring pulsing
-      if (burnerActiveRef.current && burnerRingsRef.current.length > 0) {
+      if (!reducedMotionRef.current && burnerActiveRef.current && burnerRingsRef.current.length > 0) {
         const pulse = 0.45 + Math.sin(elapsedTime * 4) * 0.08;
         burnerRingsRef.current.forEach((ring) => {
           if (ring.material instanceof THREE.Material) {
@@ -2874,8 +2943,8 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
       // Smooth camera position interpolation
       if (targetCameraPosRef.current && targetLookAtRef.current && cameraRef.current && controlsRef.current) {
-        cameraRef.current.position.lerp(targetCameraPosRef.current, 0.06);
-        controlsRef.current.target.lerp(targetLookAtRef.current, 0.06);
+        cameraRef.current.position.lerp(targetCameraPosRef.current, reducedMotionRef.current ? 1 : 0.06);
+        controlsRef.current.target.lerp(targetLookAtRef.current, reducedMotionRef.current ? 1 : 0.06);
         if (cameraRef.current.position.distanceTo(targetCameraPosRef.current) < 0.01) {
           targetCameraPosRef.current = null;
           targetLookAtRef.current = null;
@@ -2887,7 +2956,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
         dishwasherDoorGroupRef.current.rotation.x = THREE.MathUtils.lerp(
           dishwasherDoorGroupRef.current.rotation.x,
           targetRot,
-          0.08
+          reducedMotionRef.current ? 1 : 0.08
         );
       }
 
@@ -2939,6 +3008,9 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       controls.removeEventListener('start', onOrbitStart);
       controls.removeEventListener('change', onInteraction);
 
+      renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
+      renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
+      graphicsReadyRef.current = false;
       // 3. Dispose OrbitControls
       controls.dispose();
       controlsRef.current = null;
@@ -2982,7 +3054,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       targetCameraPosRef.current = null;
       targetLookAtRef.current = null;
     };
-  }, [rebuildKitchenScene, disposeHierarchy, markInteraction, clearProductInstallation, stopProductDrag]);
+  }, [rebuildKitchenScene, disposeHierarchy, markInteraction, clearProductInstallation, stopProductDrag, confirmProductInstallation, reportGraphics, graphicsRetry]);
 
   // Re-run kitchen reconstruction on configuration change
   useEffect(() => {
@@ -3134,21 +3206,21 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
   // Generate accessible configuration text summary for screen readers
   const accessibleSummary = lang === 'ja'
-    ? `パナソニック Sクラス システムキッチン 3Dモデル表示中。レイアウト: ${config.layout} (2550mm × 650mm × 850mm)、扉色: ${config.cabinetFinish}、シンク位置: ${config.sinkLocation === 'left' ? '左勝手 (L)' : '右勝手 (R)'}、フロアユニット: ${config.floorUnit === 'front-dishwasher' ? 'フロントオープン食洗機ユニット' : 'スライド引き出しユニット'}。稼働状態: 水流 ${waterActive ? '稼働' : '停止'}、IH ${burnerActive ? '点灯' : '消灯'}、ファン ${fanActive ? '回転' : '停止'}、LED照明 ${ledActive ? '点灯' : '消灯'}。キーボード操作案内: 矢印キーで視点回転、+/-キーでズーム、1〜5キーで視点プリセット切替、Rキーでリセット。`
+    ? `パナソニック Sクラス システムキッチン 3Dモデル表示中。レイアウト: ${config.layout}、扉色: ${config.cabinetFinish}、シンク位置: ${config.sinkLocation === 'left' ? '左勝手 (L)' : '右勝手 (R)'}、フロアユニット: ${config.floorUnit === 'front-dishwasher' ? 'フロントオープン食洗機ユニット' : 'スライド引き出しユニット'}。稼働状態: 水流 ${waterActive ? '稼働' : '停止'}、IH ${burnerActive ? '点灯' : '消灯'}、ファン ${fanActive ? '回転' : '停止'}、LED照明 ${ledActive ? '点灯' : '消灯'}。キーボード操作案内: 矢印キーで視点回転、+/-キーでズーム、1〜5キーで視点プリセット切替、Rキーでリセット。`
     : lang === 'mm'
-    ? `Panasonic S-Class မီးဖိုချောင် 3D မော်ဒယ်။ အပြင်အဆင်: ${config.layout} (2550mm × 650mm × 850mm)၊ ဘေစင်နေရာ: ${config.sinkLocation === 'left' ? 'ဘယ်' : 'ညာ'}၊ ခလုတ်များ: မြှားခလုတ်များဖြင့် လှည့်ကြည့်ပါ၊ +/- ဖြင့် ချုံ့/ချဲ့ပါ၊ 1-5 ဖြင့် အမြင်ပြောင်းပါ။`
-    : `Panasonic S-Class System Kitchen 3D Interactive Model. Layout: ${config.layout} (2550mm x 650mm x 850mm), Cabinet finish: ${config.cabinetFinish}, Sink: ${config.sinkLocation === 'left' ? 'Left-handed' : 'Right-handed'}, Floor unit: ${config.floorUnit}. Keyboard controls: Arrow keys to rotate view, +/- to zoom, 1-5 keys for presets, R to reset camera.`;
+    ? `Panasonic S-Class မီးဖိုချောင် 3D မော်ဒယ်။ အပြင်အဆင်: ${config.layout}၊ ဘေစင်နေရာ: ${config.sinkLocation === 'left' ? 'ဘယ်' : 'ညာ'}၊ ခလုတ်များ: မြှားခလုတ်များဖြင့် လှည့်ကြည့်ပါ၊ +/- ဖြင့် ချုံ့/ချဲ့ပါ၊ 1-5 ဖြင့် အမြင်ပြောင်းပါ။`
+    : `Panasonic S-Class System Kitchen 3D Interactive Model. Layout: ${config.layout}, Cabinet finish: ${config.cabinetFinish}, Sink: ${config.sinkLocation === 'left' ? 'Left-handed' : 'Right-handed'}, Floor unit: ${config.floorUnit}. Keyboard controls: Arrow keys to rotate view, +/- to zoom, 1-5 keys for presets, R to reset camera.`;
 
   return (
-    <section 
-      role="region" 
+    <section
+      role="region"
       aria-label={lang === 'ja' ? '3Dシステムキッチン インタラクティブビューポート' : '3D System Kitchen Interactive Viewport'}
       className="relative w-full h-full min-h-[420px] lg:min-h-[520px] flex flex-col rounded-2xl overflow-hidden glass-panel border border-slate-700/60 shadow-2xl"
     >
       {/* 3D WebGL Canvas Container with Accessibility Attributes */}
-      <div 
-        ref={containerRef} 
-        id="three-canvas-viewport" 
+      <div
+        ref={containerRef}
+        id="three-canvas-viewport"
         role="region"
         tabIndex={0}
         aria-label={lang === 'ja' ? '3Dキッチンモデル インタラクティブ操作画面' : '3D Kitchen Model Interactive Viewport'}
@@ -3156,6 +3228,18 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
         onKeyDown={handleCanvasKeyDown}
         className="w-full h-full flex-1 relative cursor-grab active:cursor-grabbing select-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-inset focus-visible:outline-none"
       />
+
+      {graphicsStatus !== 'ready' && (
+        <div id="graphics-fallback" role="status" aria-live="polite" className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-slate-950/95 p-6 text-center">
+          <p>{graphicsStatus === 'lost' ? t.graphics_interrupted : graphicsStatus === 'starting' ? t.graphics_starting : t.graphics_unavailable}</p>
+          {graphicsStatus !== 'starting' && <button type="button" id="graphics-retry" className="min-h-[3rem] rounded-lg bg-emerald-600 px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+            onClick={() => {
+              if (graphicsStatus === 'lost' && rendererRef.current) {
+                try { rendererRef.current.forceContextRestore(); } catch { reportGraphics('unavailable'); }
+              } else setGraphicsRetry(n => n + 1);
+            }}>{t.graphics_retry}</button>}
+        </div>
+      )}
 
       {/* Accessible Text Summary for Screen Readers */}
       <div id="three-viewport-summary" className="sr-only">
@@ -3169,7 +3253,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
           {/* Dimensions & Active Layout Spec Pill */}
           <div className="pointer-events-auto flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/80 backdrop-blur-md border border-slate-700/80 text-xs shadow-lg text-slate-200">
             <span className="w-2 h-2 rounded-full bg-[#00a86b] animate-pulse" aria-hidden="true" />
-            <span className="font-semibold text-emerald-400">2550mm × 650mm × 850mm</span>
+            <span className="font-semibold text-emerald-400">{t[{'type-i': 'layout_type_i_name', 'type-l': 'layout_type_l_name', 'type-ii': 'layout_type_ii_name', 'face-to-face': 'layout_face_to_face_name', island: 'layout_island_name'}[config.layout]]}</span>
             <span className="text-slate-500" aria-hidden="true">|</span>
             <span className="text-slate-300">
               {config.sinkLocation === 'left' ? 'Sink Left (L)' : 'Sink Right (R)'}
@@ -3177,7 +3261,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
           </div>
 
           {/* Floating Material Swatch Selector (Japanese Luxury Finishes) */}
-          <div 
+          <div
             role="toolbar"
             aria-label={lang === 'ja' ? '扉面材マテリアル選択' : 'Cabinet Material Finishes'}
             className="pointer-events-auto flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-950/85 backdrop-blur-md border border-slate-700/80 shadow-lg"
@@ -3239,7 +3323,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
           </div>
 
           {/* Floating Wall Style HUD Selector (Microcement, Subway Tile, Accent Slate) */}
-          <div 
+          <div
             role="toolbar"
             aria-label={lang === 'ja' ? '壁・バックパネル仕上げ選択' : 'Architectural Wall & Backsplash Finishes'}
             className="pointer-events-auto flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-950/85 backdrop-blur-md border border-slate-700/80 shadow-lg"
@@ -3301,7 +3385,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
           </div>
 
           {/* Floating Floor Style HUD Selector (Ash Tile, Japandi Oak, Raw Concrete) */}
-          <div 
+          <div
             role="toolbar"
             aria-label={lang === 'ja' ? '床面仕上げ選択' : 'Showroom Floor Finishes'}
             className="pointer-events-auto flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-950/85 backdrop-blur-md border border-slate-700/80 shadow-lg"
@@ -3384,9 +3468,9 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
           </button>
 
           {/* Component Isolation Mode Selector */}
-          <div 
-            role="group" 
-            aria-label="Component Isolation" 
+          <div
+            role="group"
+            aria-label="Component Isolation"
             className="hidden md:flex items-center gap-0.5 bg-slate-950/70 p-0.5 rounded-lg border border-slate-800"
           >
             <button
@@ -3549,8 +3633,8 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       {/* Bottom Interactive Simulation Dashboard: Water, Burner, Fan, Dishwasher Toggles */}
       <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-between gap-2 pointer-events-none z-10">
         {/* Camera Angle Presets Toolbar */}
-        <nav 
-          aria-label={lang === 'ja' ? 'カメラ視点切替プリセット' : 'Camera view presets'} 
+        <nav
+          aria-label={lang === 'ja' ? 'カメラ視点切替プリセット' : 'Camera view presets'}
           className="pointer-events-auto flex items-center gap-1 p-1 rounded-xl bg-slate-950/85 backdrop-blur-md border border-slate-800 shadow-xl overflow-x-auto"
         >
           <div className="px-2 py-1 text-[11px] font-medium text-slate-400 flex items-center gap-1">
@@ -3635,8 +3719,8 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
         </nav>
 
         {/* 3D Functional Simulation Toggles */}
-        <div 
-          role="toolbar" 
+        <div
+          role="toolbar"
           aria-label={lang === 'ja' ? '3D機能シミュレーション操作' : '3D equipment simulation controls'}
           className="pointer-events-auto flex items-center gap-1.5 p-1 rounded-xl bg-slate-950/85 backdrop-blur-md border border-slate-800 shadow-xl"
         >

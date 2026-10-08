@@ -1,14 +1,15 @@
+import { useModalFocus } from '../utils/useModalFocus';
 import React, { useState } from 'react';
 import { KitchenConfig, PriceCalculation, Language } from '../types';
 import { TRANSLATIONS } from '../i18n/translations';
 import { formatYen } from '../utils/pricing';
-import { 
-  X, 
-  Printer, 
-  Copy, 
-  Check, 
-  Building2, 
-  Sparkles, 
+import {
+  X,
+  Printer,
+  Copy,
+  Check,
+  Building2,
+  Sparkles,
   FileCheck2,
   Calendar,
   Hash
@@ -31,30 +32,32 @@ export const QuotationModal: React.FC<QuotationModalProps> = ({
   lang,
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [quoteNumber] = useState(() => 'PSK-' + Math.floor(100000 + Math.random() * 900000));
+  const dialogRef = useModalFocus(isOpen, onClose);
   const t = TRANSLATIONS[lang] || TRANSLATIONS.ja;
 
   if (!isOpen) return null;
 
-  const quoteNumber = 'PSK-' + Math.floor(100000 + Math.random() * 900000);
-  const currentDate = new Date().toLocaleDateString(lang === 'ja' ? 'ja-JP' : 'en-US', {
+  const currentDate = new Date().toLocaleDateString(lang === 'ja' ? 'ja-JP' : lang === 'mm' ? 'my-MM' : 'en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   });
 
-  const handleCopySummary = () => {
+  const handleCopySummary = async () => {
     const summaryText = `
 ========================================
 ${t.quote_summary_title}
 ${t.brand_title}
-Quotation No: ${quoteNumber}
-Date: ${currentDate}
+${t.quote_reference}: ${quoteNumber}
+${t.quote_date}: ${currentDate}
 ========================================
 ${priceCalc.items
   .map(
     (item, idx) =>
       `${idx + 1}. ${item.name} ${item.detail ? `(${item.detail})` : ''}: ${
-        item.price === 0 ? '込 / ¥0' : formatYen(item.price)
+        item.price === 0 ? t.quote_included : formatYen(item.price)
       }`
   )
   .join('\n')}
@@ -66,15 +69,20 @@ ${t.quote_grand_total}: ${formatYen(priceCalc.grandTotal)}
 ${t.quote_notice}
     `.trim();
 
-    navigator.clipboard.writeText(summaryText).then(() => {
+    setCopyError(null);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(summaryText);
       setCopied(true);
-      confetti({
-        particleCount: 40,
-        spread: 60,
-        origin: { y: 0.6 },
-      });
-      setTimeout(() => setCopied(false), 3000);
-    });
+
+    } catch {
+      setCopied(false);
+      setCopyError(summaryText);
+      return;
+    }
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      try { confetti({ particleCount: 40, spread: 60, origin: { y: 0.6 } }); } catch { /* Decorative feedback must not report a clipboard failure. */ }
+    }
   };
 
   const handlePrint = () => {
@@ -83,20 +91,20 @@ ${t.quote_notice}
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md overflow-y-auto">
-      <div 
-        id="quotation-print-modal" 
+      <div
+        id="quotation-print-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="quotation-modal-title" tabIndex={-1}
         className="relative w-full max-w-3xl glass-panel-elevated rounded-2xl shadow-2xl border border-emerald-500/30 overflow-hidden my-auto print-container"
       >
         {/* Modal Header Bar (Hidden in print) */}
         <div className="no-print flex items-center justify-between p-4 bg-slate-900/90 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <FileCheck2 className="w-5 h-5 text-emerald-400" />
-            <h3 className="font-bold text-base text-white">
+            <h3 id="quotation-modal-title" className="font-bold text-base text-white">
               {t.quote_summary_title}
             </h3>
           </div>
           <button
-            id="close-quote-modal-btn"
+            id="close-quote-modal-btn" aria-label={t.dialog_close}
             onClick={onClose}
             className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
@@ -111,13 +119,13 @@ ${t.quote_notice}
             <div>
               <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 print:text-emerald-700 tracking-wider uppercase">
                 <Building2 className="w-4 h-4" />
-                <span>Panasonic Living Appliances System Kitchen</span>
+                <span>{t.brand_title}</span>
               </div>
               <h1 className="text-2xl font-extrabold text-white print:text-black mt-1">
-                S-CLASS システムキッチン 御見積書
+                {t.quote_summary_title}
               </h1>
               <p className="text-xs text-slate-400 print:text-gray-600 mt-1">
-                2550mm ハイグレードカスタムモデル
+                {t.concept_notice}
               </p>
             </div>
 
@@ -174,10 +182,10 @@ ${t.quote_notice}
                       {item.detail || '-'}
                     </td>
                     <td className="py-3 px-4 text-center text-slate-400 print:text-black">
-                      1 式
+                      {t.quote_quantity_one}
                     </td>
                     <td className="py-3 px-4 text-right font-mono font-bold text-slate-200 print:text-black whitespace-nowrap">
-                      {item.price === 0 ? '込 / +¥0' : formatYen(item.price)}
+                      {item.price === 0 ? t.quote_included : formatYen(item.price)}
                     </td>
                   </tr>
                 ))}
@@ -217,6 +225,11 @@ ${t.quote_notice}
           </div>
         </div>
 
+        {copyError && <div role="status" aria-live="polite" className="no-print px-6 pb-4 text-sm text-slate-200">
+          <p>{t.quote_copy_failed}</p>
+          <textarea aria-label={t.quote_manual_copy} readOnly value={copyError} onFocus={e => e.currentTarget.select()}
+            className="mt-2 h-32 w-full select-text rounded-lg bg-slate-900 p-3 focus-visible:ring-2 focus-visible:ring-emerald-300" />
+        </div>}
         {/* Action Controls Toolbar (Hidden in Print) */}
         <div className="no-print p-4 bg-slate-900/90 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
           <button
@@ -251,7 +264,7 @@ ${t.quote_notice}
               onClick={onClose}
               className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
             >
-              閉じる
+              {t.dialog_close}
             </button>
           </div>
         </div>

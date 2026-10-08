@@ -1,9 +1,9 @@
-import { 
-  PlanLayoutOption, 
-  PlanDetailOption, 
-  FloorUnitOption, 
-  UpgradeOption, 
-  CabinetFinishOption 
+import {
+  PlanLayoutOption,
+  PlanDetailOption,
+  FloorUnitOption,
+  UpgradeOption,
+  CabinetFinishOption
 } from '../types';
 
 export const PLAN_LAYOUTS: PlanLayoutOption[] = [
@@ -39,7 +39,7 @@ export const PLAN_LAYOUTS: PlanLayoutOption[] = [
     subNameKey: 'layout_type_ii_sub',
     descriptionKey: 'layout_type_ii_desc',
     basePrice: 1350000,
-    dimensions: 'W2550 + W1800 × D650 mm',
+    dimensions: '2 × W2550 × D650 mm',
   },
   {
     id: 'island',
