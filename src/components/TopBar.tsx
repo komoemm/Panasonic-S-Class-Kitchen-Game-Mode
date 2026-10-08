@@ -29,7 +29,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   return (
     <header className="w-full glass-panel border-b border-slate-800/80 sticky top-0 z-30 px-4 lg:px-6 py-2.5">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+      <div className="max-w-7xl mx-auto flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
         {/* Brand & Title */}
         <div className="flex items-center gap-3">
           <div className="flex flex-col">
@@ -52,13 +52,14 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
 
         {/* Right Controls: Live Total + 2D Blueprint + Language Switcher */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex min-w-0 items-center justify-between gap-1.5 sm:justify-start sm:gap-3">
           {/* 2D Blueprint Button */}
           <button
             id="topbar-blueprint-btn"
             onClick={onOpenBlueprintModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white text-xs font-medium border border-slate-700/60 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 min-h-[2.75rem] sm:min-h-0 px-2 sm:px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white text-xs font-medium border border-slate-700/60 transition-colors cursor-pointer"
             title={t.view_blueprint}
+            aria-label={t.view_blueprint}
           >
             <Layers className="w-3.5 h-3.5 text-emerald-400" />
             <span className="hidden sm:inline">{t.view_blueprint}</span>
@@ -68,7 +69,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             id="topbar-quotation-badge"
             onClick={onOpenQuotationModal}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-gradient-to-r from-slate-900 to-emerald-950/70 hover:to-emerald-900/80 border border-emerald-500/40 shadow-sm transition-all text-left cursor-pointer group"
+            className="flex items-center gap-1.5 sm:gap-2 min-h-[2.75rem] sm:min-h-0 px-2 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-slate-900 to-emerald-950/70 hover:to-emerald-900/80 border border-emerald-500/40 shadow-sm transition-all text-left cursor-pointer group"
           >
             <FileText className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
             <div className="flex flex-col">
@@ -91,7 +92,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 key={l.code}
                 id={`lang-btn-${l.code}`}
                 onClick={() => onSelectLang(l.code)}
-                className={`px-2 py-1 text-xs rounded-lg font-medium transition-all ${
+                className={`min-h-[2.75rem] sm:min-h-0 whitespace-nowrap px-1.5 sm:px-2 py-1 text-xs rounded-lg font-medium transition-all ${
                   lang === l.code
                     ? 'bg-[#00a86b] text-white shadow-sm font-bold'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'

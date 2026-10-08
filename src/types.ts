@@ -2,6 +2,13 @@ export type Language = 'ja' | 'en' | 'mm';
 
 export type AppMode = 'explore' | 'game';
 
+export type PlacementOrientation = 'horizontal' | 'vertical';
+
+export type ProductInstallationTask = {
+  productId: 'sink' | 'cooktop' | 'rangeHood';
+  placementOrientation: PlacementOrientation;
+};
+
 export type PlanLayoutId = 'type-i' | 'type-l' | 'face-to-face' | 'type-ii' | 'island';
 
 export interface PlanLayoutOption {
