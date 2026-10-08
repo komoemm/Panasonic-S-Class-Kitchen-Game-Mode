@@ -9,6 +9,9 @@ import { KNOWLEDGE_QUESTIONS } from './data/sClassGameContent';
 import { ProductKnowledgeCard } from './components/ProductKnowledgeCard';
 import { LAYOUT_SCENARIOS } from './data/sClassLayoutScenarios';
 import { CustomerScenarioCard } from './components/CustomerScenarioCard';
+import { TrainingJourney, TrainingPhase } from './components/TrainingJourney';
+import { TrainingResults, TrainingCategory } from './components/TrainingResults';
+import { createTrainingAudio } from './utils/trainingAudio';
 
 type IdentifyProductId = 'sink' | 'cooktop' | 'rangeHood';
 type IdentifyTask = {
@@ -55,7 +58,7 @@ export default function App() {
   const [scenarioPreviewed, setScenarioPreviewed] = useState(false);
   const [score, setScore] = useState(0);
   const [gameStatus, setGameStatus] = useState<'idle' | 'playing' | 'identification-complete' | 'installation-complete' | 'knowledge-complete' | 'complete'>('idle');
-  const [gamePhase, setGamePhase] = useState<'identification' | 'installation' | 'knowledge' | 'scenario'>('identification');
+  const [gamePhase, setGamePhase] = useState<TrainingPhase>('identification');
   const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null);
   const [availableProductIds, setAvailableProductIds] = useState<string[] | null>(null);
   // Synchronous action lock also protects answers/Next before React commits an update.
@@ -70,6 +73,16 @@ export default function App() {
   const scenarioSessionRef = useRef(0);
   const scenarioSession = scenarioSessionRef.current;
   const preScenarioRef = useRef<{ config: KitchenConfig; step: number; sidebarOpen: boolean } | null>(null);
+  const [reviewTraining, setReviewTraining] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const audioRef = useRef<ReturnType<typeof createTrainingAudio> | null>(null);
+  if (!audioRef.current) audioRef.current = createTrainingAudio();
+  useEffect(() => () => audioRef.current?.dispose(), []);
+  const handleToggleSound = () => {
+    const enabled = !soundEnabled;
+    audioRef.current?.setEnabled(enabled);
+    setSoundEnabled(enabled);
+  };
 
   useEffect(() => {
     activeKnowledgeQuestionIdRef.current = appMode === 'game' && gamePhase === 'knowledge' && gameStatus === 'playing'
@@ -104,6 +117,7 @@ export default function App() {
   const handleStartGame = () => {
     if (!canStartGame) return;
     taskPhaseRef.current = 'inactive';
+    setReviewTraining(false);
     setCurrentTaskIndex(0);
     setCurrentInstallationTaskIndex(0);
     setCurrentKnowledgeIndex(0);
@@ -122,6 +136,7 @@ export default function App() {
     taskPhaseRef.current = 'inactive';
     activeScenarioIdRef.current = null;
     scenarioSessionRef.current += 1;
+    setReviewTraining(false);
     const original = preScenarioRef.current;
     preScenarioRef.current = null;
     if (original) {
@@ -174,13 +189,18 @@ export default function App() {
     if (appMode !== 'game' || gamePhase !== 'identification' ||
       gameStatus !== 'playing' || taskPhaseRef.current !== 'ready') return;
     if (productId !== currentTask.productId) {
+      audioRef.current?.play('wrong');
       setFeedback('wrong');
       return;
     }
     taskPhaseRef.current = 'answered';
+    audioRef.current?.play('correct');
     setScore((previous) => previous + currentTask.points);
     setFeedback('correct');
-    if (currentTaskIndex === IDENTIFY_TASKS.length - 1) setGameStatus('identification-complete');
+    if (currentTaskIndex === IDENTIFY_TASKS.length - 1) {
+      setGameStatus('identification-complete');
+      audioRef.current?.play('complete');
+    }
   }, [appMode, gamePhase, gameStatus, currentTask, currentTaskIndex]);
 
   const handleNextTask = () => {
@@ -206,13 +226,18 @@ export default function App() {
       gameStatus !== 'playing' || taskPhaseRef.current !== 'ready' ||
       productId !== currentInstallationTask.productId) return;
     if (!correct) {
+      audioRef.current?.play('wrong');
       setFeedback('wrong');
       return;
     }
     taskPhaseRef.current = 'answered';
+    audioRef.current?.play('correct');
     setFeedback('correct');
     setScore((previous) => previous + currentInstallationTask.points);
-    if (currentInstallationTaskIndex === INSTALLATION_TASKS.length - 1) setGameStatus('installation-complete');
+    if (currentInstallationTaskIndex === INSTALLATION_TASKS.length - 1) {
+      setGameStatus('installation-complete');
+      audioRef.current?.play('complete');
+    }
   }, [appMode, gamePhase, gameStatus, currentInstallationTask, currentInstallationTaskIndex]);
 
   const handleNextInstallation = () => {
@@ -240,13 +265,18 @@ export default function App() {
     const answer = currentKnowledgeQuestion.answers.find((choice) => choice.id === answerId);
     if (!answer) return;
     if (!answer.correct) {
+      audioRef.current?.play('wrong');
       setFeedback('wrong');
       return;
     }
     taskPhaseRef.current = 'answered';
+    audioRef.current?.play('correct');
     setFeedback('correct');
     setScore((previous) => previous + currentKnowledgeQuestion.points);
-    if (currentKnowledgeIndex === KNOWLEDGE_QUESTIONS.length - 1) setGameStatus('knowledge-complete');
+    if (currentKnowledgeIndex === KNOWLEDGE_QUESTIONS.length - 1) {
+      setGameStatus('knowledge-complete');
+      audioRef.current?.play('complete');
+    }
   };
 
   const handleNextKnowledge = () => {
@@ -282,10 +312,12 @@ export default function App() {
     if (!isActiveScenario(scenarioId) || taskPhaseRef.current !== 'ready' ||
       !currentScenario.choices.some((choice) => choice.id === layoutId)) return;
     if (layoutId !== currentScenario.layoutId) {
+      audioRef.current?.play('wrong');
       setFeedback('wrong');
       return;
     }
     taskPhaseRef.current = 'answered';
+    audioRef.current?.play('correct');
     setFeedback('correct');
     setScore((previous) => previous + currentScenario.points);
   };
@@ -296,7 +328,10 @@ export default function App() {
     // Use the same configuration setter as the wizard; the existing scene rebuild handles geometry.
     setConfig((previous) => previous.layout === currentScenario.layoutId ? previous : { ...previous, layout: currentScenario.layoutId });
     setScenarioPreviewed(true);
-    if (currentScenarioIndex === LAYOUT_SCENARIOS.length - 1) setGameStatus('complete');
+    if (currentScenarioIndex === LAYOUT_SCENARIOS.length - 1) {
+      setGameStatus('complete');
+      audioRef.current?.play('complete');
+    }
   };
 
   const handleNextCustomer = (scenarioId: string) => {
@@ -318,12 +353,28 @@ export default function App() {
     gamePhase === 'scenario' ? t[currentScenario.questionKey] :
     gamePhase === 'knowledge' ? t[currentKnowledgeQuestion.titleKey] :
     gamePhase === 'installation' ? t[currentInstallationTask.instructionKey] : t[currentTask.instructionKey];
-  const trainingTitle = gamePhase === 'scenario' ? t.game_customer_training : gamePhase === 'knowledge' ? t.game_product_knowledge :
+  const trainingTitle = gameStatus === 'complete' ? t.game_result : gamePhase === 'scenario' ? t.game_customer_training : gamePhase === 'knowledge' ? t.game_product_knowledge :
     gamePhase === 'installation' ? t.game_installation_training : t.game_training;
   const trainingHint = gamePhase === 'scenario' ? t.game_scenario_hint : gamePhase === 'knowledge' ? t.game_knowledge_hint :
     gamePhase === 'installation' ? t.game_drag_product_hint : t.game_click_hint;
   const taskPoints = gamePhase === 'scenario' ? currentScenario.points : gamePhase === 'knowledge' ? currentKnowledgeQuestion.points :
     gamePhase === 'installation' ? currentInstallationTask.points : currentTask.points;
+
+  // Sequential phase totals come from the existing task data and single score state.
+  const productNames = [t.game_sink, t.game_cooktop, t.game_range_hood];
+  const resultGroups = [
+    { id: 'identification', label: t.game_identification, tasks: IDENTIFY_TASKS, items: productNames },
+    { id: 'installation', label: t.game_install, tasks: INSTALLATION_TASKS, items: productNames },
+    { id: 'knowledge', label: t.game_knowledge_category, tasks: KNOWLEDGE_QUESTIONS, items: KNOWLEDGE_QUESTIONS.map((question) => t[question.titleKey]) },
+    { id: 'scenario', label: t.game_customer_scenarios, tasks: LAYOUT_SCENARIOS, items: LAYOUT_SCENARIOS.map((scenario) => t[scenario.choices.find((choice) => choice.id === scenario.layoutId)!.labelKey]) },
+  ];
+  let previousMaximum = 0;
+  const resultCategories: TrainingCategory[] = resultGroups.map(({ tasks, ...group }) => {
+    const maximum = tasks.reduce((sum, task) => sum + task.points, 0);
+    const points = Math.max(0, Math.min(maximum, score - previousMaximum));
+    previousMaximum += maximum;
+    return { ...group, points, maximum };
+  });
 
   return (
     <div className="min-h-screen flex flex-col bg-[#080c15] text-slate-100 selection:bg-[#00a86b] selection:text-white">
@@ -338,6 +389,15 @@ export default function App() {
 
       {/* React training HUD; the Three.js viewport stays mounted below. */}
       <section aria-label={trainingTitle} className="max-w-[1720px] w-full mx-auto px-3 sm:px-5 lg:px-6 pt-4">
+        {appMode === 'game' && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <TrainingJourney phase={gamePhase} phaseComplete={gameStatus !== 'playing'} lang={lang} />
+            <button type="button" id="sound-toggle-btn" aria-pressed={soundEnabled} {...trainingButtonEvents(handleToggleSound)}
+              className="min-h-[2.75rem] rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:border-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
+              {t.game_sound}: {soundEnabled ? t.game_sound_on : t.game_sound_off}
+            </button>
+          </div>
+        )}
         <div className="flex flex-col items-start gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between rounded-xl border border-slate-700 bg-slate-900/90 px-4 py-3">
           <div>
             <p className="text-xs font-bold tracking-widest text-emerald-400">{trainingTitle}</p>
@@ -362,7 +422,7 @@ export default function App() {
             )}
           </div>
           {appMode === 'game' && (
-            <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-4">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-sm">
               <p className="font-semibold" id="game-score">{t.game_score}: {score}</p>
               {(gameStatus === 'identification-complete' || gamePhase !== 'identification') && (
                 <p className="font-semibold" id="game-products-identified">
@@ -379,7 +439,7 @@ export default function App() {
                 <p className="font-semibold" id="game-scenarios-count">{t.game_customer_scenarios}: {LAYOUT_SCENARIOS.length} / {LAYOUT_SCENARIOS.length}</p>
               )}
               <p role="status" aria-live="polite" aria-atomic="true" id="game-feedback"
-                className={`grid min-h-[2.5rem] sm:min-h-0 font-bold ${feedback === 'wrong' ? 'text-red-400' : feedback === 'correct' ? 'text-emerald-400' : 'text-slate-300'}`}>
+                className={`training-feedback grid w-full rounded-lg border px-3 py-2 min-h-[2.75rem] font-bold ${feedback === 'wrong' ? 'border-red-800 bg-red-950/40 text-red-300' : feedback === 'correct' ? 'border-emerald-800 bg-emerald-950/40 text-emerald-300' : 'border-slate-700 text-slate-300'}`}>
                 <span className="col-start-1 row-start-1">
                   {feedback === 'correct' ? `✓ ${t.game_correct} +${taskPoints}` : feedback === 'wrong' ? `✕ ${t.game_try_again}` : trainingHint}
                 </span>
@@ -388,32 +448,32 @@ export default function App() {
               {gameStatus === 'playing' && gamePhase === 'identification' && (
                 <button type="button" id="next-task-btn" onClick={handleNextTask}
                   disabled={feedback !== 'correct'} aria-hidden={feedback !== 'correct'}
-                  className={`rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ${feedback !== 'correct' ? 'invisible' : ''}`}>
+                  className={`min-h-[3rem] rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ${feedback !== 'correct' ? 'invisible' : ''}`}>
                   {t.game_next_task}
                 </button>
               )}
               {gameStatus === 'identification-complete' && (
                 <button type="button" id="start-installation-btn" onClick={handleStartInstallation}
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
+                  className="min-h-[3rem] rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
                   {t.game_start_installation}
                 </button>
               )}
               {gameStatus === 'installation-complete' && (
                 <button type="button" id="start-knowledge-btn" {...trainingButtonEvents(handleStartKnowledge)}
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
+                  className="min-h-[3rem] rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
                   {t.game_start_knowledge}
                 </button>
               )}
               {gameStatus === 'knowledge-complete' && (
                 <button type="button" id="start-scenarios-btn" {...trainingButtonEvents(handleStartScenarios)}
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
+                  className="min-h-[3rem] rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
                   {t.game_start_scenarios}
                 </button>
               )}
               {gameStatus === 'playing' && gamePhase === 'installation' && currentInstallationTaskIndex < INSTALLATION_TASKS.length - 1 && (
                 <button type="button" id="next-installation-btn" {...trainingButtonEvents(handleNextInstallation)}
                   disabled={feedback !== 'correct'} aria-hidden={feedback !== 'correct'}
-                  className={`rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ${feedback !== 'correct' ? 'invisible' : ''}`}>
+                  className={`min-h-[3rem] rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ${feedback !== 'correct' ? 'invisible' : ''}`}>
                   {t.game_next_installation}
                 </button>
               )}
@@ -423,7 +483,7 @@ export default function App() {
             {...trainingButtonEvents(appMode === 'explore' ? handleStartGame : handleReturnToExplore)}
             disabled={appMode === 'explore' && !canStartGame}
             aria-describedby={appMode === 'explore' && availableProductIds !== null && !canStartGame ? 'game-unavailable' : undefined}
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
+            className="min-h-[3rem] rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
             {appMode === 'explore' ? t.game_start : t.game_return}
           </button>
         </div>
@@ -431,6 +491,10 @@ export default function App() {
 
       {/* Main Responsive Layout */}
       <main className="flex-1 max-w-[1720px] w-full mx-auto p-3 sm:p-5 lg:p-6 flex flex-col lg:flex-row gap-4 lg:gap-6 relative overflow-x-hidden">
+        {appMode === 'game' && gameStatus === 'complete' && (
+          <TrainingResults lang={lang} score={score} categories={resultCategories} review={reviewTraining}
+            onToggleReview={() => setReviewTraining(!reviewTraining)} onReturn={handleReturnToExplore} buttonEvents={trainingButtonEvents} />
+        )}
         {appMode === 'game' && gamePhase === 'knowledge' && gameStatus === 'playing' ? (
           <ProductKnowledgeCard question={currentKnowledgeQuestion} lang={lang} feedback={feedback}
             hasNext={currentKnowledgeIndex < KNOWLEDGE_QUESTIONS.length - 1}
@@ -539,4 +603,3 @@ export default function App() {
     </div>
   );
 }
-

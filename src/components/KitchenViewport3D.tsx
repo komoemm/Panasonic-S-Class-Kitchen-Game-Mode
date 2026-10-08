@@ -184,6 +184,22 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     needsRenderRef.current = true;
   }, []);
 
+  // Frame measured target + staging once; reuse the existing camera interpolation.
+  const frameInstallation = useCallback((bounds: THREE.Box3, clone: THREE.Object3D, vertical: boolean) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    clone.updateWorldMatrix(true, true);
+    const sphere = bounds.clone().union(new THREE.Box3().setFromObject(clone)).getBoundingSphere(new THREE.Sphere());
+    const verticalFov = THREE.MathUtils.degToRad(camera.fov) / 2;
+    const horizontalFov = Math.atan(Math.tan(verticalFov) * camera.aspect);
+    const distance = THREE.MathUtils.clamp(sphere.radius * 1.16 / Math.sin(Math.min(verticalFov, horizontalFov)), controls.minDistance, controls.maxDistance);
+    const direction = new THREE.Vector3(0, vertical ? 0.18 : 0.85, 1).normalize();
+    targetLookAtRef.current = sphere.center;
+    targetCameraPosRef.current = sphere.center.clone().addScaledVector(direction, distance);
+    markInteraction();
+  }, [markInteraction]);
+
   const stopProductDrag = useCallback((resetPosition: boolean) => {
     const training = installationRef.current;
     if (!training?.drag) return;
@@ -304,8 +320,9 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       locked: false, drag: null,
     };
     product.visible = false;
+    frameInstallation(bounds, clone, vertical);
     markInteraction();
-  }, [markInteraction]);
+  }, [markInteraction, frameInstallation]);
 
   // Exploded factor synchronization
   useEffect(() => {
@@ -2569,7 +2586,14 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     container.addEventListener('wheel', onInteraction, { passive: true });
     container.addEventListener('touchstart', onInteraction, { passive: true });
     container.addEventListener('touchmove', onInteraction, { passive: true });
-    controls.addEventListener('start', onInteraction);
+    const onOrbitStart = () => {
+      if (modeRef.current === 'game' && installationTaskRef.current) {
+        targetCameraPosRef.current = null;
+        targetLookAtRef.current = null;
+      }
+      markInteraction();
+    };
+    controls.addEventListener('start', onOrbitStart);
     controls.addEventListener('change', onInteraction);
 
     const handleVisibilityChange = () => {
@@ -2854,7 +2878,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       container.removeEventListener('wheel', onInteraction);
       container.removeEventListener('touchstart', onInteraction);
       container.removeEventListener('touchmove', onInteraction);
-      controls.removeEventListener('start', onInteraction);
+      controls.removeEventListener('start', onOrbitStart);
       controls.removeEventListener('change', onInteraction);
 
       // 3. Dispose OrbitControls

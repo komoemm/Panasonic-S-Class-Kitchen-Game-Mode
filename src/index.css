@@ -15,6 +15,11 @@
   }
 }
 
+.training-feedback { transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
+@media (prefers-reduced-motion: reduce) {
+  .training-feedback { transition: none; }
+}
+
 /* Custom smooth dark scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
