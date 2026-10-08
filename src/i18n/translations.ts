@@ -2,6 +2,23 @@ import { Language } from '../types';
 
 export const TRANSLATIONS: Record<Language, Record<string, string>> = {
   ja: {
+    // Customer scenarios: verified catalog concepts and existing application layouts
+    game_knowledge_complete: "製品知識トレーニング完了",
+    game_customer_training: "S-CLASS お客様シナリオトレーニング",
+    game_start_scenarios: "お客様シナリオトレーニングを開始",
+    game_customer_requirements: "お客様のご要望",
+    game_scenario: "シナリオ",
+    game_scenario_question: "このご要望に合うS-CLASSのレイアウトはどれですか？",
+    game_scenario_hint: "ご要望を読んで、レイアウトを選んでください。",
+    game_view_layout: "おすすめレイアウトを見る",
+    game_next_customer: "次のお客様",
+    game_customer_scenarios: "お客様シナリオ",
+    game_scenario_i_requirement: "シンクと加熱調理機器を、壁に沿った一つの直線のカウンターにまとめたいです。",
+    game_scenario_i_rationale: "I型は、シンクと加熱調理機器を一列にまとめたレイアウトです。このプレビューは壁に沿った直線のカウンターです。",
+    game_scenario_ii_requirement: "シンク側とクッキングヒーター側を、平行な二列の作業カウンターに分けたいです。",
+    game_scenario_ii_rationale: "II型は、シンク側と加熱調理側を二列に分けたレイアウトです。このプレビューでも、二つの平行なカウンターに分かれています。",
+    game_scenario_l_requirement: "つながったカウンターを直角に曲げてL字にし、曲がった先の部分に下ごしらえのスペースがほしいです。",
+    game_scenario_l_rationale: "L型は、つながったカウンターが直角に曲がるレイアウトです。このプレビューでは、シンクとクッキングヒーターは長い辺に並び、短い辺は追加の作業スペースです。",
     // Product knowledge: customer-approved catalog summaries
     game_product_knowledge: "製品知識トレーニング",
     game_start_knowledge: "製品知識トレーニングを開始",
@@ -225,6 +242,23 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     dim_hood_height: 'フード天面: 2,150 mm',
   },
   en: {
+    // Customer scenarios: verified catalog concepts and existing application layouts
+    game_knowledge_complete: "PRODUCT KNOWLEDGE COMPLETE",
+    game_customer_training: "S-CLASS CUSTOMER TRAINING",
+    game_start_scenarios: "Start Customer Scenario Training",
+    game_customer_requirements: "Customer Requirements",
+    game_scenario: "SCENARIO",
+    game_scenario_question: "Which S-CLASS layout fits these requirements?",
+    game_scenario_hint: "Read the requirements, then choose a layout.",
+    game_view_layout: "View Recommended Layout",
+    game_next_customer: "Next Customer",
+    game_customer_scenarios: "Customer Scenarios",
+    game_scenario_i_requirement: "I want the Sink and cooking equipment together in one straight row along the wall.",
+    game_scenario_i_rationale: "I-Type arranges the Sink and cooking equipment in one row. This preview uses one straight counter along the wall.",
+    game_scenario_ii_requirement: "I want the Sink side and cooktop side separated into two parallel working rows.",
+    game_scenario_ii_rationale: "II-Type divides the Sink and cooking zones into two rows. This preview separates them onto two parallel counters.",
+    game_scenario_l_requirement: "I want one connected worktop that turns at a right angle to form an L, with preparation space on the return.",
+    game_scenario_l_rationale: "L-Type has a connected counter that turns at a right angle. In this preview, the Sink and Cooktop stay on the main run; the return provides additional worktop space.",
     // Product knowledge: customer-approved catalog summaries
     game_product_knowledge: "PRODUCT KNOWLEDGE",
     game_start_knowledge: "Start Product Knowledge",
@@ -435,6 +469,23 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     dim_hood_height: 'Hood Top Height: 2,150 mm',
   },
   mm: {
+    // Customer scenarios: verified catalog concepts and existing application layouts
+    game_knowledge_complete: "ထုတ်ကုန် အသိပညာ လေ့ကျင့်မှု ပြီးဆုံးပါပြီ",
+    game_customer_training: "S-CLASS ဖောက်သည် လိုအပ်ချက် လေ့ကျင့်မှု",
+    game_start_scenarios: "ဖောက်သည် လိုအပ်ချက် လေ့ကျင့်မှု စတင်ရန်",
+    game_customer_requirements: "ဖောက်သည်၏ လိုအပ်ချက်များ",
+    game_scenario: "အခြေအနေ",
+    game_scenario_question: "ဤလိုအပ်ချက်များနှင့် ကိုက်ညီသော S-CLASS မီးဖိုချောင်ပုံစံမှာ မည်သည့်ပုံစံလဲ။",
+    game_scenario_hint: "လိုအပ်ချက်များကို ဖတ်ပြီး မီးဖိုချောင်ပုံစံတစ်ခုကို ရွေးပါ။",
+    game_view_layout: "အကြံပြုထားသော ပုံစံကို ကြည့်ရန်",
+    game_next_customer: "နောက်ဖောက်သည်",
+    game_customer_scenarios: "ဖောက်သည် အခြေအနေများ",
+    game_scenario_i_requirement: "ဘေစင်နှင့် ချက်ပြုတ်ကိရိယာများကို နံရံတစ်လျှောက် မျဉ်းဖြောင့်တစ်တန်းတည်းတွင် အတူထားချင်ပါသည်။",
+    game_scenario_i_rationale: "I-Type တွင် ဘေစင်နှင့် ချက်ပြုတ်ကိရိယာများကို တစ်တန်းတည်းထားပါသည်။ ဤနမူနာတွင် နံရံတစ်လျှောက် မျဉ်းဖြောင့်ကောင်တာတစ်ခုကို အသုံးပြုထားပါသည်။",
+    game_scenario_ii_requirement: "ဘေစင်ပိုင်းနှင့် မီးဖိုခုံပိုင်းကို အပြိုင်ရှိသော အလုပ်ကောင်တာနှစ်တန်းအဖြစ် ခွဲထားချင်ပါသည်။",
+    game_scenario_ii_rationale: "II-Type တွင် ဘေစင်ပိုင်းနှင့် ချက်ပြုတ်ပိုင်းကို နှစ်တန်းခွဲထားပါသည်။ ဤနမူနာတွင်လည်း အပြိုင်ကောင်တာနှစ်ခုအဖြစ် ခွဲထားပါသည်။",
+    game_scenario_l_requirement: "ဆက်နေသော အလုပ်ကောင်တာကို ထောင့်မှန်ချိုး၍ L ပုံစံထားပြီး ချိုးထားသော အပိုင်းတွင် ပြင်ဆင်ရန်နေရာ လိုချင်ပါသည်။",
+    game_scenario_l_rationale: "L-Type သည် ထောင့်မှန်ချိုးထားသော ဆက်နေသည့် ကောင်တာပုံစံဖြစ်ပါသည်။ ဤနမူနာတွင် ဘေစင်နှင့် မီးဖိုခုံသည် ရှည်သောဘက်၌ ရှိပြီး ချိုးထားသောဘက်သည် အပိုအလုပ်နေရာဖြစ်ပါသည်။",
     // Product knowledge: customer-approved catalog summaries
     game_product_knowledge: "ထုတ်ကုန် အသိပညာ လေ့ကျင့်မှု",
     game_start_knowledge: "ထုတ်ကုန် အသိပညာ လေ့ကျင့်မှု စတင်ရန်",

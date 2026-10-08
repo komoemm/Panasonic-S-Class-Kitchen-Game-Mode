@@ -2680,6 +2680,10 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     backSkirtingRef.current = backSkirting;
     backsplashMeshRef.current = backsplashPanel;
 
+    // Configuration previews recreate these materials; retain the selected Explore finishes.
+    if (wallFinish !== 'microcement') updateWallMaterials(wallFinish);
+    if (floorFinish !== 'ash_tile') updateFloorMaterials(floorFinish);
+
     // Initial build
     rebuildKitchenScene();
 

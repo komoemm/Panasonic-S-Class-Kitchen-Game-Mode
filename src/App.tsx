@@ -7,6 +7,8 @@ import { KitchenViewportSkeleton } from './components/KitchenViewportSkeleton';
 import { TRANSLATIONS } from './i18n/translations';
 import { KNOWLEDGE_QUESTIONS } from './data/sClassGameContent';
 import { ProductKnowledgeCard } from './components/ProductKnowledgeCard';
+import { LAYOUT_SCENARIOS } from './data/sClassLayoutScenarios';
+import { CustomerScenarioCard } from './components/CustomerScenarioCard';
 
 type IdentifyProductId = 'sink' | 'cooktop' | 'rangeHood';
 type IdentifyTask = {
@@ -49,24 +51,33 @@ export default function App() {
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
   const [currentInstallationTaskIndex, setCurrentInstallationTaskIndex] = useState(0);
   const [currentKnowledgeIndex, setCurrentKnowledgeIndex] = useState(0);
+  const [currentScenarioIndex, setCurrentScenarioIndex] = useState(0);
+  const [scenarioPreviewed, setScenarioPreviewed] = useState(false);
   const [score, setScore] = useState(0);
-  const [gameStatus, setGameStatus] = useState<'idle' | 'playing' | 'identification-complete' | 'installation-complete' | 'complete'>('idle');
-  const [gamePhase, setGamePhase] = useState<'identification' | 'installation' | 'knowledge'>('identification');
+  const [gameStatus, setGameStatus] = useState<'idle' | 'playing' | 'identification-complete' | 'installation-complete' | 'knowledge-complete' | 'complete'>('idle');
+  const [gamePhase, setGamePhase] = useState<'identification' | 'installation' | 'knowledge' | 'scenario'>('identification');
   const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null);
   const [availableProductIds, setAvailableProductIds] = useState<string[] | null>(null);
   // Synchronous action lock also protects answers/Next before React commits an update.
-  const taskPhaseRef = useRef<'inactive' | 'ready' | 'answered' | 'advancing'>('inactive');
+  const taskPhaseRef = useRef<'inactive' | 'ready' | 'answered' | 'previewed' | 'advancing'>('inactive');
   const trainingButtonTouchRef = useRef<{ pointerId: number; x: number; y: number; button: HTMLButtonElement } | null>(null);
   const currentTask = IDENTIFY_TASKS[currentTaskIndex];
   const currentInstallationTask = INSTALLATION_TASKS[currentInstallationTaskIndex];
   const currentKnowledgeQuestion = KNOWLEDGE_QUESTIONS[currentKnowledgeIndex];
   const activeKnowledgeQuestionIdRef = useRef<string | null>(null);
+  const currentScenario = LAYOUT_SCENARIOS[currentScenarioIndex];
+  const activeScenarioIdRef = useRef<string | null>(null);
+  const scenarioSessionRef = useRef(0);
+  const scenarioSession = scenarioSessionRef.current;
+  const preScenarioRef = useRef<{ config: KitchenConfig; step: number; sidebarOpen: boolean } | null>(null);
 
   useEffect(() => {
     activeKnowledgeQuestionIdRef.current = appMode === 'game' && gamePhase === 'knowledge' && gameStatus === 'playing'
       ? currentKnowledgeQuestion.id : null;
+    activeScenarioIdRef.current = appMode === 'game' && gamePhase === 'scenario' && gameStatus === 'playing'
+      ? currentScenario.id : null;
     taskPhaseRef.current = appMode === 'game' && gameStatus === 'playing' ? 'ready' : 'inactive';
-  }, [appMode, currentTaskIndex, currentInstallationTaskIndex, currentKnowledgeIndex, gameStatus, gamePhase]);
+  }, [appMode, currentTaskIndex, currentInstallationTaskIndex, currentKnowledgeIndex, currentScenarioIndex, gameStatus, gamePhase]);
 
   // Default initial configuration
   const [config, setConfig] = useState<KitchenConfig>({
@@ -97,6 +108,9 @@ export default function App() {
     setCurrentInstallationTaskIndex(0);
     setCurrentKnowledgeIndex(0);
     activeKnowledgeQuestionIdRef.current = null;
+    activeScenarioIdRef.current = null;
+    setCurrentScenarioIndex(0);
+    setScenarioPreviewed(false);
     setScore(0);
     setFeedback(null);
     setGamePhase('identification');
@@ -106,6 +120,17 @@ export default function App() {
 
   const handleReturnToExplore = () => {
     taskPhaseRef.current = 'inactive';
+    activeScenarioIdRef.current = null;
+    scenarioSessionRef.current += 1;
+    const original = preScenarioRef.current;
+    preScenarioRef.current = null;
+    if (original) {
+      setConfig(original.config);
+      setCurrentStep(original.step);
+      setIsSidebarOpen(original.sidebarOpen);
+    }
+    setCurrentScenarioIndex(0);
+    setScenarioPreviewed(false);
     setCurrentInstallationTaskIndex(0);
     setCurrentKnowledgeIndex(0);
     activeKnowledgeQuestionIdRef.current = null;
@@ -221,7 +246,7 @@ export default function App() {
     taskPhaseRef.current = 'answered';
     setFeedback('correct');
     setScore((previous) => previous + currentKnowledgeQuestion.points);
-    if (currentKnowledgeIndex === KNOWLEDGE_QUESTIONS.length - 1) setGameStatus('complete');
+    if (currentKnowledgeIndex === KNOWLEDGE_QUESTIONS.length - 1) setGameStatus('knowledge-complete');
   };
 
   const handleNextKnowledge = () => {
@@ -234,18 +259,70 @@ export default function App() {
     setCurrentKnowledgeIndex((previous) => previous + 1);
   };
 
+  const handleStartScenarios = () => {
+    if (appMode !== 'game' || gamePhase !== 'knowledge' || gameStatus !== 'knowledge-complete' ||
+      taskPhaseRef.current !== 'inactive') return;
+    taskPhaseRef.current = 'advancing';
+    scenarioSessionRef.current += 1;
+    // Snapshot the whole existing configuration, including the nested upgrades record.
+    // Viewport-owned finishes/isolation/exploded state remain in the mounted viewport.
+    preScenarioRef.current = { config: { ...config, upgrades: { ...config.upgrades } }, step: currentStep, sidebarOpen: isSidebarOpen };
+    setCurrentScenarioIndex(0);
+    setScenarioPreviewed(false);
+    setFeedback(null);
+    setGamePhase('scenario');
+    setGameStatus('playing');
+  };
+
+  const isActiveScenario = (scenarioId: string) => appMode === 'game' && gamePhase === 'scenario' &&
+    gameStatus === 'playing' && scenarioSession === scenarioSessionRef.current &&
+    scenarioId === activeScenarioIdRef.current && currentScenario.id === activeScenarioIdRef.current;
+
+  const handleScenarioAnswer = (scenarioId: string, layoutId: string) => {
+    if (!isActiveScenario(scenarioId) || taskPhaseRef.current !== 'ready' ||
+      !currentScenario.choices.some((choice) => choice.id === layoutId)) return;
+    if (layoutId !== currentScenario.layoutId) {
+      setFeedback('wrong');
+      return;
+    }
+    taskPhaseRef.current = 'answered';
+    setFeedback('correct');
+    setScore((previous) => previous + currentScenario.points);
+  };
+
+  const handlePreviewLayout = (scenarioId: string) => {
+    if (!isActiveScenario(scenarioId) || taskPhaseRef.current !== 'answered') return;
+    taskPhaseRef.current = 'previewed';
+    // Use the same configuration setter as the wizard; the existing scene rebuild handles geometry.
+    setConfig((previous) => previous.layout === currentScenario.layoutId ? previous : { ...previous, layout: currentScenario.layoutId });
+    setScenarioPreviewed(true);
+    if (currentScenarioIndex === LAYOUT_SCENARIOS.length - 1) setGameStatus('complete');
+  };
+
+  const handleNextCustomer = (scenarioId: string) => {
+    if (!isActiveScenario(scenarioId) || taskPhaseRef.current !== 'previewed' ||
+      currentScenarioIndex >= LAYOUT_SCENARIOS.length - 1) return;
+    taskPhaseRef.current = 'advancing';
+    activeScenarioIdRef.current = null;
+    setCurrentScenarioIndex((previous) => previous + 1);
+    setScenarioPreviewed(false);
+    setFeedback(null);
+  };
+
   const installationTask = appMode === 'game' && gamePhase === 'installation' &&
     gameStatus === 'playing' && feedback !== 'correct' ? currentInstallationTask : null;
   const instruction = gameStatus === 'complete' ? t.game_complete :
     gameStatus === 'identification-complete' ? t.game_identification_complete :
     gameStatus === 'installation-complete' ? t.game_installation_complete :
+    gameStatus === 'knowledge-complete' ? t.game_knowledge_complete :
+    gamePhase === 'scenario' ? t[currentScenario.questionKey] :
     gamePhase === 'knowledge' ? t[currentKnowledgeQuestion.titleKey] :
     gamePhase === 'installation' ? t[currentInstallationTask.instructionKey] : t[currentTask.instructionKey];
-  const trainingTitle = gamePhase === 'knowledge' ? t.game_product_knowledge :
+  const trainingTitle = gamePhase === 'scenario' ? t.game_customer_training : gamePhase === 'knowledge' ? t.game_product_knowledge :
     gamePhase === 'installation' ? t.game_installation_training : t.game_training;
-  const trainingHint = gamePhase === 'knowledge' ? t.game_knowledge_hint :
+  const trainingHint = gamePhase === 'scenario' ? t.game_scenario_hint : gamePhase === 'knowledge' ? t.game_knowledge_hint :
     gamePhase === 'installation' ? t.game_drag_product_hint : t.game_click_hint;
-  const taskPoints = gamePhase === 'knowledge' ? currentKnowledgeQuestion.points :
+  const taskPoints = gamePhase === 'scenario' ? currentScenario.points : gamePhase === 'knowledge' ? currentKnowledgeQuestion.points :
     gamePhase === 'installation' ? currentInstallationTask.points : currentTask.points;
 
   return (
@@ -268,7 +345,8 @@ export default function App() {
               <>
                 {gameStatus === 'playing' && (
                   <p className="mt-1 text-xs font-semibold text-slate-400" id="game-progress">
-                    {gamePhase === 'knowledge' ? t.game_knowledge : t.game_task} {gamePhase === 'knowledge'
+                    {gamePhase === 'scenario' ? t.game_scenario : gamePhase === 'knowledge' ? t.game_knowledge : t.game_task} {gamePhase === 'scenario'
+                      ? `${currentScenarioIndex + 1} / ${LAYOUT_SCENARIOS.length}` : gamePhase === 'knowledge'
                       ? `${currentKnowledgeIndex + 1} / ${KNOWLEDGE_QUESTIONS.length}`
                       : gamePhase === 'installation' ? `${currentInstallationTaskIndex + 1} / ${INSTALLATION_TASKS.length}`
                       : `${currentTaskIndex + 1} / ${IDENTIFY_TASKS.length}`}
@@ -291,11 +369,14 @@ export default function App() {
                   {t.game_products_identified}: {IDENTIFY_TASKS.length} / {IDENTIFY_TASKS.length}
                 </p>
               )}
-              {(gameStatus === 'installation-complete' || gamePhase === 'knowledge') && (
+              {(gameStatus === 'installation-complete' || gamePhase === 'knowledge' || gamePhase === 'scenario') && (
                 <p className="font-semibold" id="game-products-installed">{t.game_products_installed}: {INSTALLATION_TASKS.length} / {INSTALLATION_TASKS.length}</p>
               )}
-              {gameStatus === 'complete' && (
+              {(gameStatus === 'knowledge-complete' || gamePhase === 'scenario') && (
                 <p className="font-semibold" id="game-knowledge-count">{t.game_knowledge}: {KNOWLEDGE_QUESTIONS.length} / {KNOWLEDGE_QUESTIONS.length}</p>
+              )}
+              {gameStatus === 'complete' && (
+                <p className="font-semibold" id="game-scenarios-count">{t.game_customer_scenarios}: {LAYOUT_SCENARIOS.length} / {LAYOUT_SCENARIOS.length}</p>
               )}
               <p role="status" aria-live="polite" aria-atomic="true" id="game-feedback"
                 className={`grid min-h-[2.5rem] sm:min-h-0 font-bold ${feedback === 'wrong' ? 'text-red-400' : feedback === 'correct' ? 'text-emerald-400' : 'text-slate-300'}`}>
@@ -323,6 +404,12 @@ export default function App() {
                   {t.game_start_knowledge}
                 </button>
               )}
+              {gameStatus === 'knowledge-complete' && (
+                <button type="button" id="start-scenarios-btn" {...trainingButtonEvents(handleStartScenarios)}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
+                  {t.game_start_scenarios}
+                </button>
+              )}
               {gameStatus === 'playing' && gamePhase === 'installation' && currentInstallationTaskIndex < INSTALLATION_TASKS.length - 1 && (
                 <button type="button" id="next-installation-btn" {...trainingButtonEvents(handleNextInstallation)}
                   disabled={feedback !== 'correct'} aria-hidden={feedback !== 'correct'}
@@ -344,12 +431,18 @@ export default function App() {
 
       {/* Main Responsive Layout */}
       <main className="flex-1 max-w-[1720px] w-full mx-auto p-3 sm:p-5 lg:p-6 flex flex-col lg:flex-row gap-4 lg:gap-6 relative overflow-x-hidden">
-        {appMode === 'game' && gamePhase === 'knowledge' && gameStatus === 'playing' && (
+        {appMode === 'game' && gamePhase === 'knowledge' && gameStatus === 'playing' ? (
           <ProductKnowledgeCard question={currentKnowledgeQuestion} lang={lang} feedback={feedback}
             hasNext={currentKnowledgeIndex < KNOWLEDGE_QUESTIONS.length - 1}
             onAnswer={(answerId) => handleKnowledgeAnswer(currentKnowledgeQuestion.id, answerId)}
             onNext={handleNextKnowledge} buttonEvents={trainingButtonEvents} />
-        )}
+        ) : appMode === 'game' && gamePhase === 'scenario' && gameStatus === 'playing' ? (
+          <CustomerScenarioCard scenario={currentScenario} lang={lang} feedback={feedback} previewed={scenarioPreviewed}
+            hasNext={currentScenarioIndex < LAYOUT_SCENARIOS.length - 1}
+            onAnswer={(layoutId) => handleScenarioAnswer(currentScenario.id, layoutId)}
+            onPreview={() => handlePreviewLayout(currentScenario.id)}
+            onNext={() => handleNextCustomer(currentScenario.id)} buttonEvents={trainingButtonEvents} />
+        ) : null}
         {/* Left / Center 3D Interactive Viewport with Suspense Skeleton */}
         <section 
           aria-label={lang === 'ja' ? '3Dモデル表示領域' : '3D Model Viewport Area'}
