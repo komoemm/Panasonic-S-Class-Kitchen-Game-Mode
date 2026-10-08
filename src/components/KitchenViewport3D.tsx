@@ -26,6 +26,19 @@ import {
 export type WallFinishId = 'microcement' | 'tile' | 'accent_slate';
 export type FloorFinishId = 'ash_tile' | 'oak_wood' | 'concrete';
 
+// Color and height data have different color spaces, even when drawn on one canvas.
+function replaceSurfaceTextures(material: THREE.MeshStandardMaterial, colorMap: THREE.Texture | null) {
+  new Set([material.map, material.bumpMap]).forEach((texture) => texture?.dispose());
+  material.map = colorMap;
+  material.bumpMap = colorMap?.clone() ?? null;
+  if (material.map) material.map.colorSpace = THREE.SRGBColorSpace;
+  if (material.bumpMap) {
+    material.bumpMap.colorSpace = THREE.NoColorSpace;
+    material.bumpMap.needsUpdate = true;
+  }
+  material.needsUpdate = true;
+}
+
 function findProductId(object: THREE.Object3D): string | null {
   let current: THREE.Object3D | null = object;
   while (current) {
@@ -423,7 +436,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
     // Subtle fine vertical wood grain lines and undulating rings
     for (let x = 0; x < 512; x += 2) {
-      const alpha = 0.035 + 0.03 * Math.sin(x * 0.12) + 0.02 * Math.cos(x * 0.05);
+      const alpha = 0.10 + 0.055 * Math.sin(x * 0.12) + 0.025 * Math.cos(x * 0.05);
       const isDarker = (x % 6 === 0) || Math.random() > 0.82;
       ctx.fillStyle = isDarker ? `rgba(145, 95, 45, ${alpha})` : `rgba(235, 195, 140, ${alpha * 0.7})`;
       ctx.fillRect(x, 0, 1.5, 512);
@@ -433,7 +446,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     const imgData = ctx.getImageData(0, 0, 512, 512);
     const data = imgData.data;
     for (let i = 0; i < data.length; i += 4) {
-      const noise = (Math.random() - 0.5) * 8;
+      const noise = (Math.random() - 0.5) * 4;
       data[i] = Math.min(255, Math.max(0, data[i] + noise));
       data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + noise));
       data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + noise));
@@ -441,9 +454,10 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     ctx.putImageData(imgData, 0, 0);
 
     const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(2, 2);
+    texture.repeat.set(1, 1); // Cabinet UVs below use a 600 × 1200 mm grain tile.
     return texture;
   }, []);
 
@@ -486,9 +500,10 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     ctx.putImageData(imgData, 0, 0);
 
     const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(4, 4);
+    texture.repeat.set(2, 1);
     return texture;
   }, []);
 
@@ -548,9 +563,10 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     }
 
     const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(3, 2);
+    texture.repeat.set(9, 1.75); // 100 × 50 mm tiles across the 3.6 × 0.7 m backsplash.
     return texture;
   }, []);
 
@@ -588,9 +604,10 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     ctx.stroke();
 
     const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(8, 8);
+    texture.repeat.set(40, 40); // 600 mm tiles on the 24 m showroom floor.
     return texture;
   }, []);
 
@@ -616,6 +633,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     ctx.putImageData(imgData, 0, 0);
 
     const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.repeat.set(4, 4);
@@ -628,28 +646,25 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
     if (finish === 'microcement') {
       const noiseTex = createMicrocementTexture();
-      backsplashMaterialRef.current.color.setHex(0xe2e0dc);
+      backsplashMaterialRef.current.color.setHex(0xffffff);
       backsplashMaterialRef.current.roughness = 0.78;
       backsplashMaterialRef.current.metalness = 0.02;
-      backsplashMaterialRef.current.map = noiseTex;
-      backsplashMaterialRef.current.bumpMap = noiseTex;
+      replaceSurfaceTextures(backsplashMaterialRef.current, noiseTex);
       backsplashMaterialRef.current.bumpScale = 0.003;
       backsplashMaterialRef.current.needsUpdate = true;
     } else if (finish === 'tile') {
       const tileTex = createSubwayTileTexture();
-      backsplashMaterialRef.current.color.setHex(0xeceae6);
+      backsplashMaterialRef.current.color.setHex(0xffffff);
       backsplashMaterialRef.current.roughness = 0.35;
       backsplashMaterialRef.current.metalness = 0.05;
-      backsplashMaterialRef.current.map = tileTex;
-      backsplashMaterialRef.current.bumpMap = tileTex;
+      replaceSurfaceTextures(backsplashMaterialRef.current, tileTex);
       backsplashMaterialRef.current.bumpScale = 0.008;
       backsplashMaterialRef.current.needsUpdate = true;
     } else if (finish === 'accent_slate') {
       backsplashMaterialRef.current.color.setHex(0x3b3e42);
       backsplashMaterialRef.current.roughness = 0.85;
       backsplashMaterialRef.current.metalness = 0.08;
-      backsplashMaterialRef.current.map = null;
-      backsplashMaterialRef.current.bumpMap = null;
+      replaceSurfaceTextures(backsplashMaterialRef.current, null);
       backsplashMaterialRef.current.needsUpdate = true;
     }
 
@@ -662,32 +677,29 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
     if (finish === 'ash_tile') {
       const tileTex = createPorcelainTileTexture();
-      floorMaterialRef.current.color.setHex(0xc0bfc3);
+      floorMaterialRef.current.color.setHex(0xffffff);
       floorMaterialRef.current.roughness = 0.65;
       floorMaterialRef.current.metalness = 0.05;
-      floorMaterialRef.current.map = tileTex;
-      floorMaterialRef.current.bumpMap = tileTex;
-      floorMaterialRef.current.bumpScale = 0.004;
+      replaceSurfaceTextures(floorMaterialRef.current, tileTex);
+      floorMaterialRef.current.bumpScale = 0.0015;
       floorMaterialRef.current.needsUpdate = true;
     } else if (finish === 'oak_wood') {
       const oakTex = createWoodGrainTexture();
       if (oakTex) {
-        oakTex.repeat.set(8, 8);
+        oakTex.repeat.set(40, 20); // 600 × 1200 mm grain tiles on the 24 m floor.
       }
-      floorMaterialRef.current.color.setHex(0xd2b28c);
+      floorMaterialRef.current.color.setHex(0xffffff);
       floorMaterialRef.current.roughness = 0.45;
       floorMaterialRef.current.metalness = 0.02;
-      floorMaterialRef.current.map = oakTex;
-      floorMaterialRef.current.bumpMap = oakTex;
-      floorMaterialRef.current.bumpScale = 0.003;
+      replaceSurfaceTextures(floorMaterialRef.current, oakTex);
+      floorMaterialRef.current.bumpScale = 0.001;
       floorMaterialRef.current.needsUpdate = true;
     } else if (finish === 'concrete') {
       const concreteTex = createConcreteTexture();
-      floorMaterialRef.current.color.setHex(0xdeddd9);
+      floorMaterialRef.current.color.setHex(0xffffff);
       floorMaterialRef.current.roughness = 0.72;
       floorMaterialRef.current.metalness = 0.03;
-      floorMaterialRef.current.map = concreteTex;
-      floorMaterialRef.current.bumpMap = concreteTex;
+      replaceSurfaceTextures(floorMaterialRef.current, concreteTex);
       floorMaterialRef.current.bumpScale = 0.003;
       floorMaterialRef.current.needsUpdate = true;
     }
@@ -883,51 +895,59 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
     // Determine cabinet finish material
     // Japanese luxury finishes:
-    // - charcoal: { color: 0x222426, roughness: 0.68, metalness: 0.05 } (Deep architectural slate)
-    // - white: { color: 0xf6f6f8, roughness: 0.32, metalness: 0.02 } (Matte satin lacquer)
-    // - oak: { color: 0xd2ab79, roughness: 0.60, metalness: 0.0 } with procedural fine grain texture canvas
+    // - charcoal: { color: 0x222426, roughness: 0.60, metalness: 0.0 } (Deep architectural slate)
+    // - white: { color: 0xf2f1ed, roughness: 0.42, metalness: 0.0 } (Matte satin lacquer)
+    // - oak: white base, roughness 0.50, metalness 0.0 with procedural color and bump maps
     const finishId = config.cabinetFinish;
     let cabinetMat: THREE.MeshStandardMaterial;
 
     if (finishId === 'white-w') {
       cabinetMat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(0xf6f6f8),
-        roughness: 0.32,
-        metalness: 0.02,
+        color: new THREE.Color(0xf2f1ed),
+        roughness: 0.42,
+        metalness: 0.0,
       });
     } else if (finishId === 'oak-wood') {
       const woodTexture = createWoodGrainTexture();
       cabinetMat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(0xd2ab79),
-        roughness: 0.60,
+        color: new THREE.Color(0xffffff), // The color map already contains the oak tint.
+        roughness: 0.50,
         metalness: 0.0,
-        map: woodTexture || undefined,
       });
+      replaceSurfaceTextures(cabinetMat, woodTexture);
+      cabinetMat.bumpScale = 0.0006;
     } else {
       // 'charcoal-slate' (Deep architectural slate)
       cabinetMat = new THREE.MeshStandardMaterial({
         color: new THREE.Color(0x222426),
-        roughness: 0.68,
-        metalness: 0.05,
+        roughness: 0.60,
+        metalness: 0.0,
       });
     }
     cabinetMaterialRef.current = cabinetMat;
 
-    // Countertop material: Organic White Quartz (#fafafa) - constant across all finishes
+    // Neutral counter finish with restrained microtexture; no catalog color/SKU claim.
     const countertopMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(0xfafafa),
-      roughness: 0.18,
-      metalness: 0.03,
-      envMapIntensity: 0.95,
+      color: new THREE.Color(0xfaf9f5),
+      roughness: 0.30,
+      metalness: 0.0,
+      envMapIntensity: 0.85,
     });
+    const counterBump = createMicrocementTexture();
+    if (counterBump) {
+      counterBump.colorSpace = THREE.NoColorSpace;
+      counterBump.repeat.set(6, 2);
+      countertopMat.bumpMap = counterBump;
+      countertopMat.bumpScale = 0.00035;
+    }
     countertopMaterialRef.current = countertopMat;
 
     // Stainless steel & architectural metal materials
     const stainlessMat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(0xdde3ea),
-      roughness: 0.18,
+      roughness: 0.26,
       metalness: 0.92,
-      envMapIntensity: 1.2,
+      envMapIntensity: 1.0,
     });
 
     const darkMetalMat = new THREE.MeshStandardMaterial({
@@ -937,12 +957,12 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       envMapIntensity: 0.85,
     });
 
-    // Jet black ceramic glass with subtle high gloss (roughness: 0.05, metalness: 0.2)
+    // Restrained ceramic-glass reflection without metallic or transmissive shading.
     const ceramicGlassMat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(0x060709),
-      roughness: 0.05,
-      metalness: 0.2,
-      envMapIntensity: 1.15,
+      roughness: 0.16,
+      metalness: 0.0,
+      envMapIntensity: 0.85,
     });
 
     // Slim minimalist matte black handles (not neon-reflective)
@@ -1641,11 +1661,11 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     const actualSinkZ = isTypeII ? (0.50 + sinkZ) : sinkZ;
     sinkGroup.position.set(sinkX, counterHeight, actualSinkZ);
 
-      // Seamless Undermount White Quartz Material (matching countertop, color: 0xf8f8fa, roughness: 0.25)
+      // Slight tonal separation from the countertop; existing basin geometry is unchanged.
       const quartzSinkMat = new THREE.MeshStandardMaterial({
-        color: 0xf8f8fa,
-        roughness: 0.25,
-        metalness: 0.02,
+        color: 0xe9eceb,
+        roughness: 0.34,
+        metalness: 0.0,
         side: THREE.DoubleSide,
       });
 
@@ -1751,7 +1771,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       sinkGroup.add(shRight);
 
       // Soft interior fill light for sink cavity visibility
-      const sinkCavityLight = new THREE.PointLight(0xffffff, 0.45, 1.8, 1.2);
+      const sinkCavityLight = new THREE.PointLight(0xffffff, 0.25, 1.8, 1.2);
       sinkCavityLight.position.set(0, 0.15, 0);
       sinkGroup.add(sinkCavityLight);
 
@@ -1933,12 +1953,12 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       slotRing.position.set(drainX, drainY + 0.0015, drainZ);
       sinkGroup.add(slotRing);
 
-      // Luxury Swan-Neck Faucet (Mirror Polished Chrome: color: 0xffffff, metalness: 0.98, roughness: 0.1)
+      // Chrome highlights use the existing studio environment with more contrast.
       const mirrorChromeMat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         metalness: 0.98,
-        roughness: 0.1,
-        envMapIntensity: 1.5,
+        roughness: 0.16,
+        envMapIntensity: 1.0,
       });
 
       const faucetGroup = new THREE.Group();
@@ -2080,12 +2100,12 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       glassPlate.receiveShadow = true;
       cooktopGroup.add(glassPlate);
 
-      // Slim perimeter beveled frame
+      // Existing perimeter frame: a subdued satin edge, with unchanged dimensions.
       const frameGeom = new THREE.BoxGeometry(cooktopWidth + 0.008, glassThickness - 0.001, cooktopDepth + 0.008);
       const frameMat = new THREE.MeshStandardMaterial({
-        color: 0x1c1f24,
-        roughness: 0.5,
-        metalness: 0.5,
+        color: 0x45494f,
+        roughness: 0.32,
+        metalness: 0.6,
       });
       const frame = new THREE.Mesh(frameGeom, frameMat);
       frame.position.set(0, glassThickness / 2 - 0.0005, 0);
@@ -2096,14 +2116,14 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       burnerRingsRef.current = [];
       burnerLightsRef.current = [];
 
-      burnerPositions.forEach((bX, bIdx) => {
-        // Outer luminous ring (Panasonic glowing guide ring)
-        const ringGeom = new THREE.RingGeometry(0.08, 0.095, 48);
+      burnerPositions.forEach((bX) => {
+        // Thin warm active-state indicator; geometry stays within the existing zone.
+        const ringGeom = new THREE.RingGeometry(0.0915, 0.095, 48);
         const ringMat = new THREE.MeshBasicMaterial({
-          color: bIdx === 1 ? 0xff6200 : (bIdx === 0 ? 0xff3b30 : 0x00d2ff),
+          color: 0xd99366,
           side: THREE.DoubleSide,
           transparent: true,
-          opacity: burnerActive ? 0.95 : 0.22,
+          opacity: burnerActive ? 0.5 : 0.16,
         });
         const ringMesh = new THREE.Mesh(ringGeom, ringMat);
         ringMesh.rotation.x = -Math.PI / 2;
@@ -2111,13 +2131,13 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
         cooktopGroup.add(ringMesh);
         burnerRingsRef.current.push(ringMesh);
 
-        // Inner glowing coil circle
-        const innerRingGeom = new THREE.RingGeometry(0.025, 0.048, 32);
+        // Restrained inner guide ring.
+        const innerRingGeom = new THREE.RingGeometry(0.046, 0.048, 32);
         const innerRingMat = new THREE.MeshBasicMaterial({
-          color: bIdx === 1 ? 0xffaa00 : (bIdx === 0 ? 0xff7b00 : 0x00f0ff),
+          color: 0xcbbba7,
           side: THREE.DoubleSide,
           transparent: true,
-          opacity: burnerActive ? 0.8 : 0.15,
+          opacity: burnerActive ? 0.5 : 0.12,
         });
         const innerRing = new THREE.Mesh(innerRingGeom, innerRingMat);
         innerRing.rotation.x = -Math.PI / 2;
@@ -2144,13 +2164,13 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
         crossV.position.set(bX, glassThickness + 0.0011, 0.005);
         cooktopGroup.add(crossV);
 
-        // Point light for cooking glow
+        // Reuse the same light with restrained warm spill, including the Type II row offset.
         const bLight = new THREE.PointLight(
-          bIdx === 1 ? 0xff6e00 : (bIdx === 0 ? 0xff4500 : 0x00e5ff),
-          burnerActive ? 0.85 : 0,
+          0xffd8b2,
+          burnerActive ? 0.06 : 0,
           0.65
         );
-        bLight.position.set(cooktopX + bX, counterHeight + 0.06, cooktopZ + 0.005);
+        bLight.position.set(cooktopX + bX, counterHeight + 0.06, actualCooktopZ + 0.005);
         counterGroup.add(bLight);
         burnerLightsRef.current.push(bLight);
       });
@@ -2162,13 +2182,35 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       touchBar.position.set(0, glassThickness + 0.0008, cooktopDepth / 2 - 0.024);
       cooktopGroup.add(touchBar);
 
+      // Original compact power/minus/plus glyphs, shared by the existing three control planes.
+      const controlCanvas = document.createElement('canvas');
+      controlCanvas.width = 128;
+      controlCanvas.height = 32;
+      const controlCtx = controlCanvas.getContext('2d');
+      if (controlCtx) {
+        controlCtx.strokeStyle = '#b9bec6';
+        controlCtx.lineWidth = 2.5;
+        controlCtx.beginPath();
+        controlCtx.arc(18, 17, 8, -Math.PI * 0.3, Math.PI * 1.3);
+        controlCtx.moveTo(18, 5); controlCtx.lineTo(18, 16);
+        controlCtx.moveTo(54, 17); controlCtx.lineTo(68, 17);
+        controlCtx.moveTo(98, 17); controlCtx.lineTo(112, 17);
+        controlCtx.moveTo(105, 10); controlCtx.lineTo(105, 24);
+        controlCtx.stroke();
+      }
+      const controlTexture = new THREE.CanvasTexture(controlCanvas);
+      controlTexture.colorSpace = THREE.SRGBColorSpace;
+      const btnMat = new THREE.MeshBasicMaterial({
+        map: controlTexture, alphaTest: 0.3, side: THREE.DoubleSide,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+      });
+
       // Touch sensor control icons for each of the 3 burner positions
       burnerPositions.forEach((bX) => {
         const btnGeom = new THREE.PlaneGeometry(0.04, 0.014);
-        const btnMat = new THREE.MeshBasicMaterial({ color: 0x3b4252, side: THREE.DoubleSide });
         const btn = new THREE.Mesh(btnGeom, btnMat);
         btn.rotation.x = -Math.PI / 2;
-        btn.position.set(bX, glassThickness + 0.0012, cooktopDepth / 2 - 0.024);
+        btn.position.set(bX, glassThickness + 0.0013, cooktopDepth / 2 - 0.024);
         cooktopGroup.add(btn);
       });
 
@@ -2350,6 +2392,23 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
     kitchen.add(wallGroup);
 
+    // World-scale oak grain on existing box faces; shared geometries are mapped once.
+    const mappedCabinetGeometries = new Set<THREE.BufferGeometry>();
+    kitchen.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (mesh.material !== cabinetMat || !cabinetMat.map || !(mesh.geometry instanceof THREE.BoxGeometry) || mappedCabinetGeometries.has(mesh.geometry)) return;
+      mappedCabinetGeometries.add(mesh.geometry);
+      const { width, height, depth } = mesh.geometry.parameters;
+      const uv = mesh.geometry.attributes.uv;
+      const normal = mesh.geometry.attributes.normal;
+      for (let i = 0; i < uv.count; i++) {
+        const uSize = Math.abs(normal.getX(i)) > 0.5 ? depth : width;
+        const vSize = Math.abs(normal.getY(i)) > 0.5 ? depth : height;
+        uv.setXY(i, uv.getX(i) * uSize / 0.6, uv.getY(i) * vSize / 1.2);
+      }
+      uv.needsUpdate = true;
+    });
+
     // Only kitchen meshes participate, excluding studio walls, floor, and lights.
     kitchen.traverse((object) => {
       if ((object as THREE.Mesh).isMesh) selectableObjectsRef.current.push(object);
@@ -2409,7 +2468,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     pmremGenerator.compileEquirectangularShader();
 
     const envScene = new THREE.Scene();
-    envScene.background = new THREE.Color(0xf4f4f6);
+    envScene.background = new THREE.Color(0x6e7680);
 
     // Ceiling diffuse softbox panel (broad white luminaire for clean specular highlights)
     const ceilingSoftbox = new THREE.Mesh(
@@ -2425,6 +2484,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
       new THREE.PlaneGeometry(10, 8),
       new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
     );
+    frontSoftbox.material.color.setHex(0xe4e8ee);
     frontSoftbox.position.set(0, 3, 7);
     frontSoftbox.rotation.y = Math.PI;
     envScene.add(frontSoftbox);
@@ -2432,7 +2492,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     // Left daylight accent reflector
     const leftReflector = new THREE.Mesh(
       new THREE.PlaneGeometry(8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xe8eef5, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({ color: 0xc1ccd9, side: THREE.DoubleSide })
     );
     leftReflector.position.set(-7, 3, 0);
     leftReflector.rotation.y = Math.PI / 2;
@@ -2441,7 +2501,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     // Right warm fill reflector
     const rightReflector = new THREE.Mesh(
       new THREE.PlaneGeometry(8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xfcf9f2, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({ color: 0xe4dcd4, side: THREE.DoubleSide })
     );
     rightReflector.position.set(7, 3, 0);
     rightReflector.rotation.y = -Math.PI / 2;
@@ -2450,7 +2510,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     // Floor reflection plane
     const envFloor = new THREE.Mesh(
       new THREE.PlaneGeometry(20, 20),
-      new THREE.MeshBasicMaterial({ color: 0xd8d8db, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({ color: 0x555b63, side: THREE.DoubleSide })
     );
     envFloor.rotation.x = -Math.PI / 2;
     envFloor.position.set(0, -0.5, 0);
@@ -2604,10 +2664,10 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Panasonic Luxury Showroom Lighting Setup
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xdedede, 0.9);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xdedede, 0.7);
     scene.add(hemiLight);
 
-    const primaryDirLight = new THREE.DirectionalLight(0xffffff, 1.4);
+    const primaryDirLight = new THREE.DirectionalLight(0xffffff, 1.75);
     primaryDirLight.position.set(4, 7, 5);
     primaryDirLight.castShadow = true;
     primaryDirLight.shadow.mapSize.width = 2048;
@@ -2626,13 +2686,12 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     const floorGeom = new THREE.PlaneGeometry(24, 24);
     const initialFloorTex = createPorcelainTileTexture();
     const floorMat = new THREE.MeshStandardMaterial({
-      color: 0xc0bfc3,
+      color: 0xffffff,
       roughness: 0.65,
       metalness: 0.05,
-      map: initialFloorTex,
-      bumpMap: initialFloorTex,
-      bumpScale: 0.004,
+      bumpScale: 0.0015,
     });
+    replaceSurfaceTextures(floorMat, initialFloorTex);
     floorMaterialRef.current = floorMat;
     const floor = new THREE.Mesh(floorGeom, floorMat);
     floor.rotation.x = -Math.PI / 2;
@@ -2686,13 +2745,12 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
     const backsplashGeom = new THREE.PlaneGeometry(3.6, 0.70);
     const initialNoise = createMicrocementTexture();
     const backsplashMat = new THREE.MeshStandardMaterial({
-      color: 0xe2e0dc,
+      color: 0xffffff,
       roughness: 0.78,
       metalness: 0.02,
-      map: initialNoise,
-      bumpMap: initialNoise,
       bumpScale: 0.003,
     });
+    replaceSurfaceTextures(backsplashMat, initialNoise);
     backsplashMaterialRef.current = backsplashMat;
 
     const backsplashPanel = new THREE.Mesh(backsplashGeom, backsplashMat);
@@ -2806,7 +2864,7 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
 
       // Animate burner ring pulsing
       if (burnerActiveRef.current && burnerRingsRef.current.length > 0) {
-        const pulse = 0.85 + Math.sin(elapsedTime * 4) * 0.15;
+        const pulse = 0.45 + Math.sin(elapsedTime * 4) * 0.08;
         burnerRingsRef.current.forEach((ring) => {
           if (ring.material instanceof THREE.Material) {
             ring.material.opacity = pulse;
@@ -2980,11 +3038,11 @@ export const KitchenViewport3D: React.FC<KitchenViewport3DProps> = ({
   useEffect(() => {
     burnerRingsRef.current.forEach((r) => {
       if (r.material instanceof THREE.Material) {
-        r.material.opacity = burnerActive ? 0.9 : 0.15;
+        r.material.opacity = burnerActive ? 0.5 : 0.15;
       }
     });
     burnerLightsRef.current.forEach((l) => {
-      l.intensity = burnerActive ? 0.8 : 0;
+      l.intensity = burnerActive ? 0.06 : 0;
     });
   }, [burnerActive]);
 
